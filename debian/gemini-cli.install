@@ -1,0 +1,2 @@
+bundle/gemini.js usr/lib/gemini-cli
+debian/helper-script/* usr/bin

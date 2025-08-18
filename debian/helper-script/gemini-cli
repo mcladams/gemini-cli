@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -e
+
+cd /usr/lib/gemini-cli/
+exec node gemini.js "$@"
