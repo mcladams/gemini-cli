@@ -3,7 +3,6 @@ Section: misc
 Priority: optional
 Maintainer: Kali Developers <devel@kali.org>
 Uploaders: Sophie Brun <sophie@kali.org>
-Rules-Requires-Root: no
 Build-Depends:
  ca-certificates,
  debhelper-compat (= 13),
