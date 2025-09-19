@@ -1,3 +1,15 @@
+gemini-cli (0.5.4-0kali1) kali-dev; urgency=medium
+
+  [ Arnaud Rebillout ]
+  * Drop 'Rules-Requires-Root: no' from d/control
+
+  [ Sophie Brun ]
+  * Update debian/watch: do not consider nightly, preview ...
+  * New upstream version 0.5.4
+  * Refresh patches
+
+ -- Sophie Brun <sophie@kali.org>  Fri, 19 Sep 2025 13:38:28 +0200
+
 gemini-cli (0.1.21-0kali1) kali-dev; urgency=medium
 
   * Initial release.
