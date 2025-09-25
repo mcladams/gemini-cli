@@ -83,6 +83,7 @@ describe('IdeClient', () => {
       close: vi.fn(),
       setNotificationHandler: vi.fn(),
       callTool: vi.fn(),
+      request: vi.fn(),
     } as unknown as Mocked<Client>;
     mockHttpTransport = {
       close: vi.fn(),
@@ -564,6 +565,125 @@ describe('IdeClient', () => {
       ).getConnectionConfigFromFile();
 
       expect(result).toEqual(config2);
+    });
+  });
+
+  describe('isDiffingEnabled', () => {
+    it('should return false if not connected', async () => {
+      const ideClient = await IdeClient.getInstance();
+      expect(ideClient.isDiffingEnabled()).toBe(false);
+    });
+
+    it('should return false if tool discovery fails', async () => {
+      const config = { port: '8080' };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+      mockClient.request.mockRejectedValue(new Error('Method not found'));
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
+      expect(ideClient.isDiffingEnabled()).toBe(false);
+    });
+
+    it('should return false if diffing tools are not available', async () => {
+      const config = { port: '8080' };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+      mockClient.request.mockResolvedValue({
+        tools: [{ name: 'someOtherTool' }],
+      });
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
+      expect(ideClient.isDiffingEnabled()).toBe(false);
+    });
+
+    it('should return false if only openDiff tool is available', async () => {
+      const config = { port: '8080' };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+      mockClient.request.mockResolvedValue({
+        tools: [{ name: 'openDiff' }],
+      });
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
+      expect(ideClient.isDiffingEnabled()).toBe(false);
+    });
+
+    it('should return true if connected and diffing tools are available', async () => {
+      const config = { port: '8080' };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+      mockClient.request.mockResolvedValue({
+        tools: [{ name: 'openDiff' }, { name: 'closeDiff' }],
+      });
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
+      expect(ideClient.isDiffingEnabled()).toBe(true);
+    });
+  });
+
+  describe('authentication', () => {
+    it('should connect with an auth token if provided in the discovery file', async () => {
+      const authToken = 'test-auth-token';
+      const config = { port: '8080', authToken };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        new URL('http://localhost:8080/mcp'),
+        expect.objectContaining({
+          requestInit: {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
+          },
+        }),
+      );
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
     });
   });
 });

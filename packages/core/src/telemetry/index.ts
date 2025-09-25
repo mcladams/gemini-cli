@@ -19,6 +19,11 @@ export {
   isTelemetrySdkInitialized,
 } from './sdk.js';
 export {
+  GcpTraceExporter,
+  GcpMetricExporter,
+  GcpLogExporter,
+} from './gcp-exporters.js';
+export {
   logCliConfiguration,
   logUserPrompt,
   logToolCall,
@@ -30,6 +35,10 @@ export {
   logConversationFinishedEvent,
   logKittySequenceOverflow,
   logChatCompression,
+  logToolOutputTruncated,
+  logExtensionEnable,
+  logExtensionInstallEvent,
+  logExtensionUninstall,
 } from './loggers.js';
 export type { SlashCommandEvent, ChatCompressionEvent } from './types.js';
 export {
@@ -44,6 +53,7 @@ export {
   ToolCallEvent,
   ConversationFinishedEvent,
   KittySequenceOverflowEvent,
+  ToolOutputTruncatedEvent,
 } from './types.js';
 export { makeSlashCommandEvent, makeChatCompressionEvent } from './types.js';
 export type { TelemetryEvent } from './types.js';
