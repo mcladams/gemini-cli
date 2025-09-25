@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import {
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useLayoutEffect,
+} from 'react';
 import { type DOMElement, measureElement } from 'ink';
 import { App } from './App.js';
 import { AppContext } from './contexts/AppContext.js';
@@ -29,11 +36,12 @@ import {
   type UserTierId,
   DEFAULT_GEMINI_FLASH_MODEL,
   IdeClient,
-  ideContext,
+  ideContextStore,
   getErrorMessage,
   getAllGeminiMdFilenames,
   AuthType,
   clearCachedCredentialFile,
+  ShellExecutionService,
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from '../config/auth.js';
 import { loadHierarchicalGeminiMemory } from '../config/config.js';
@@ -75,6 +83,7 @@ import { useAutoAcceptIndicator } from './hooks/useAutoAcceptIndicator.js';
 import { useWorkspaceMigration } from './hooks/useWorkspaceMigration.js';
 import { useSessionStats } from './contexts/SessionContext.js';
 import { useGitBranchName } from './hooks/useGitBranchName.js';
+import { useExtensionUpdates } from './hooks/useExtensionUpdates.js';
 
 const CTRL_EXIT_PROMPT_DURATION_MS = 1000;
 
@@ -97,6 +106,18 @@ interface AppContainerProps {
   initializationResult: InitializationResult;
 }
 
+/**
+ * The fraction of the terminal width to allocate to the shell.
+ * This provides horizontal padding.
+ */
+const SHELL_WIDTH_FRACTION = 0.89;
+
+/**
+ * The number of lines to subtract from the available terminal height
+ * for the shell. This provides vertical padding and space for other UI elements.
+ */
+const SHELL_HEIGHT_PADDING = 10;
+
 export const AppContainer = (props: AppContainerProps) => {
   const { settings, config, initializationResult } = props;
   const historyManager = useHistory();
@@ -110,6 +131,8 @@ export const AppContainer = (props: AppContainerProps) => {
     initializationResult.themeError,
   );
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [shellFocused, setShellFocused] = useState(false);
+
   const [geminiMdFileCount, setGeminiMdFileCount] = useState<number>(
     initializationResult.geminiMdFileCount,
   );
@@ -121,6 +144,14 @@ export const AppContainer = (props: AppContainerProps) => {
   const [isTrustedFolder, setIsTrustedFolder] = useState<boolean | undefined>(
     config.isTrustedFolder(),
   );
+
+  const extensions = config.getExtensions();
+  const { extensionsUpdateState, setExtensionsUpdateState } =
+    useExtensionUpdates(
+      extensions,
+      historyManager.addItem,
+      config.getWorkingDir(),
+    );
 
   // Helper to determine the effective model, considering the fallback state.
   const getEffectiveModel = useCallback(() => {
@@ -135,12 +166,6 @@ export const AppContainer = (props: AppContainerProps) => {
   const [userTier, setUserTier] = useState<UserTierId | undefined>(undefined);
 
   const [isConfigInitialized, setConfigInitialized] = useState(false);
-
-  // Auto-accept indicator
-  const showAutoAcceptIndicator = useAutoAcceptIndicator({
-    config,
-    addItem: historyManager.addItem,
-  });
 
   const logger = useLogger(config.storage);
   const [userMessages, setUserMessages] = useState<string[]>([]);
@@ -211,7 +236,7 @@ export const AppContainer = (props: AppContainerProps) => {
     20,
     Math.floor(terminalWidth * widthFraction) - 3,
   );
-  const suggestionsWidth = Math.max(20, Math.floor(terminalWidth * 0.8));
+  const suggestionsWidth = Math.max(20, Math.floor(terminalWidth * 1.0));
   const mainAreaWidth = Math.floor(terminalWidth * 0.9);
   const staticAreaMaxItemHeight = Math.max(terminalHeight * 4, 100);
 
@@ -404,6 +429,7 @@ Logging in with Google... Please restart Gemini CLI to continue.
       },
       setDebugMessage,
       toggleCorgiMode: () => setCorgiMode((prev) => !prev),
+      setExtensionsUpdateState,
     }),
     [
       setAuthState,
@@ -414,6 +440,7 @@ Logging in with Google... Please restart Gemini CLI to continue.
       setDebugMessage,
       setShowPrivacyNotice,
       setCorgiMode,
+      setExtensionsUpdateState,
     ],
   );
 
@@ -435,6 +462,7 @@ Logging in with Google... Please restart Gemini CLI to continue.
     setIsProcessing,
     setGeminiMdFileCount,
     slashCommandActions,
+    extensionsUpdateState,
     isConfigInitialized,
   );
 
@@ -506,6 +534,9 @@ Logging in with Google... Please restart Gemini CLI to continue.
     pendingHistoryItems: pendingGeminiHistoryItems,
     thought,
     cancelOngoingRequest,
+    handleApprovalModeChange,
+    activePtyId,
+    loopDetectionConfirmationRequest,
   } = useGeminiStream(
     config.getGeminiClient(),
     historyManager.history,
@@ -522,7 +553,18 @@ Logging in with Google... Please restart Gemini CLI to continue.
     setModelSwitchedFromQuotaError,
     refreshStatic,
     () => cancelHandlerRef.current(),
+    setShellFocused,
+    terminalWidth,
+    terminalHeight,
+    shellFocused,
   );
+
+  // Auto-accept indicator
+  const showAutoAcceptIndicator = useAutoAcceptIndicator({
+    config,
+    addItem: historyManager.addItem,
+    onApprovalModeChange: handleApprovalModeChange,
+  });
 
   const { messageQueue, addMessage, clearQueue, getQueuedMessagesText } =
     useMessageQueue({
@@ -593,14 +635,32 @@ Logging in with Google... Please restart Gemini CLI to continue.
       streamingState === StreamingState.Responding) &&
     !proQuotaRequest;
 
-  // Compute available terminal height based on controls measurement
-  const availableTerminalHeight = useMemo(() => {
+  const [controlsHeight, setControlsHeight] = useState(0);
+
+  useLayoutEffect(() => {
     if (mainControlsRef.current) {
       const fullFooterMeasurement = measureElement(mainControlsRef.current);
-      return terminalHeight - fullFooterMeasurement.height - staticExtraHeight;
+      if (fullFooterMeasurement.height > 0) {
+        setControlsHeight(fullFooterMeasurement.height);
+      }
     }
-    return terminalHeight - staticExtraHeight;
-  }, [terminalHeight]);
+  }, [buffer, terminalWidth, terminalHeight]);
+
+  // Compute available terminal height based on controls measurement
+  const availableTerminalHeight = Math.max(
+    0,
+    terminalHeight - controlsHeight - staticExtraHeight - 2,
+  );
+
+  config.setShellExecutionConfig({
+    terminalWidth: Math.floor(terminalWidth * SHELL_WIDTH_FRACTION),
+    terminalHeight: Math.max(
+      Math.floor(availableTerminalHeight - SHELL_HEIGHT_PADDING),
+      1,
+    ),
+    pager: settings.merged.tools?.shell?.pager,
+    showColor: settings.merged.tools?.shell?.showColor,
+  });
 
   const isFocused = useFocus();
   useBracketedPaste();
@@ -618,6 +678,16 @@ Logging in with Google... Please restart Gemini CLI to continue.
   const initialPrompt = useMemo(() => config.getQuestion(), [config]);
   const initialPromptSubmitted = useRef(false);
   const geminiClient = config.getGeminiClient();
+
+  useEffect(() => {
+    if (activePtyId) {
+      ShellExecutionService.resizePty(
+        activePtyId,
+        Math.floor(terminalWidth * SHELL_WIDTH_FRACTION),
+        Math.max(Math.floor(availableTerminalHeight - SHELL_HEIGHT_PADDING), 1),
+      );
+    }
+  }, [terminalWidth, availableTerminalHeight, activePtyId]);
 
   useEffect(() => {
     if (
@@ -707,8 +777,8 @@ Logging in with Google... Please restart Gemini CLI to continue.
   }, [terminalWidth, refreshStatic]);
 
   useEffect(() => {
-    const unsubscribe = ideContext.subscribeToIdeContext(setIdeContextState);
-    setIdeContextState(ideContext.getIdeContext());
+    const unsubscribe = ideContextStore.subscribe(setIdeContextState);
+    setIdeContextState(ideContextStore.get());
     return unsubscribe;
   }, []);
 
@@ -839,6 +909,10 @@ Logging in with Google... Please restart Gemini CLI to continue.
         !enteringConstrainHeightMode
       ) {
         setConstrainHeight(false);
+      } else if (keyMatchers[Command.TOGGLE_SHELL_INPUT_FOCUS](key)) {
+        if (activePtyId || shellFocused) {
+          setShellFocused((prev) => !prev);
+        }
       }
     },
     [
@@ -865,6 +939,8 @@ Logging in with Google... Please restart Gemini CLI to continue.
       isSettingsDialogOpen,
       isFolderTrustDialogOpen,
       showPrivacyNotice,
+      activePtyId,
+      shellFocused,
       settings.merged.general?.debugKeystrokeLogging,
     ],
   );
@@ -897,35 +973,20 @@ Logging in with Google... Please restart Gemini CLI to continue.
 
   const nightly = props.version.includes('nightly');
 
-  const dialogsVisible = useMemo(
-    () =>
-      showWorkspaceMigrationDialog ||
-      shouldShowIdePrompt ||
-      isFolderTrustDialogOpen ||
-      !!shellConfirmationRequest ||
-      !!confirmationRequest ||
-      isThemeDialogOpen ||
-      isSettingsDialogOpen ||
-      isAuthenticating ||
-      isAuthDialogOpen ||
-      isEditorDialogOpen ||
-      showPrivacyNotice ||
-      !!proQuotaRequest,
-    [
-      showWorkspaceMigrationDialog,
-      shouldShowIdePrompt,
-      isFolderTrustDialogOpen,
-      shellConfirmationRequest,
-      confirmationRequest,
-      isThemeDialogOpen,
-      isSettingsDialogOpen,
-      isAuthenticating,
-      isAuthDialogOpen,
-      isEditorDialogOpen,
-      showPrivacyNotice,
-      proQuotaRequest,
-    ],
-  );
+  const dialogsVisible =
+    showWorkspaceMigrationDialog ||
+    shouldShowIdePrompt ||
+    isFolderTrustDialogOpen ||
+    !!shellConfirmationRequest ||
+    !!confirmationRequest ||
+    !!loopDetectionConfirmationRequest ||
+    isThemeDialogOpen ||
+    isSettingsDialogOpen ||
+    isAuthenticating ||
+    isAuthDialogOpen ||
+    isEditorDialogOpen ||
+    showPrivacyNotice ||
+    !!proQuotaRequest;
 
   const pendingHistoryItems = useMemo(
     () => [...pendingSlashCommandHistoryItems, ...pendingGeminiHistoryItems],
@@ -953,6 +1014,7 @@ Logging in with Google... Please restart Gemini CLI to continue.
       commandContext,
       shellConfirmationRequest,
       confirmationRequest,
+      loopDetectionConfirmationRequest,
       geminiMdFileCount,
       streamingState,
       initError,
@@ -1004,6 +1066,9 @@ Logging in with Google... Please restart Gemini CLI to continue.
       updateInfo,
       showIdeRestartPrompt,
       isRestarting,
+      extensionsUpdateState,
+      activePtyId,
+      shellFocused,
     }),
     [
       historyManager.history,
@@ -1025,6 +1090,7 @@ Logging in with Google... Please restart Gemini CLI to continue.
       commandContext,
       shellConfirmationRequest,
       confirmationRequest,
+      loopDetectionConfirmationRequest,
       geminiMdFileCount,
       streamingState,
       initError,
@@ -1076,6 +1142,9 @@ Logging in with Google... Please restart Gemini CLI to continue.
       showIdeRestartPrompt,
       isRestarting,
       currentModel,
+      extensionsUpdateState,
+      activePtyId,
+      shellFocused,
     ],
   );
 
