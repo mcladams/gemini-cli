@@ -34,6 +34,7 @@ import {
   EVENT_RIPGREP_FALLBACK,
   EVENT_MODEL_ROUTING,
   EVENT_EXTENSION_ENABLE,
+  EVENT_EXTENSION_DISABLE,
   EVENT_EXTENSION_INSTALL,
   EVENT_EXTENSION_UNINSTALL,
 } from './constants.js';
@@ -51,6 +52,7 @@ import {
   logToolOutputTruncated,
   logModelRouting,
   logExtensionEnable,
+  logExtensionDisable,
   logExtensionInstallEvent,
   logExtensionUninstall,
 } from './loggers.js';
@@ -69,6 +71,7 @@ import {
   ToolOutputTruncatedEvent,
   ModelRoutingEvent,
   ExtensionEnableEvent,
+  ExtensionDisableEvent,
   ExtensionInstallEvent,
   ExtensionUninstallEvent,
 } from './types.js';
@@ -76,7 +79,11 @@ import * as metrics from './metrics.js';
 import { FileOperation } from './metrics.js';
 import * as sdk from './sdk.js';
 import { vi, describe, beforeEach, it, expect, afterEach } from 'vitest';
-import type { GenerateContentResponseUsageMetadata } from '@google/genai';
+import type {
+  CallableTool,
+  GenerateContentResponseUsageMetadata,
+} from '@google/genai';
+import { DiscoveredMCPTool } from '../tools/mcp-tool.js';
 import * as uiTelemetry from './uiTelemetry.js';
 import { makeFakeConfig } from '../test-utils/config.js';
 import { ClearcutLogger } from './clearcut-logger/clearcut-logger.js';
@@ -337,16 +344,14 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordApiResponseMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-model',
         100,
-        200,
+        { model: 'test-model', status_code: 200 },
       );
 
       expect(mockMetrics.recordTokenUsageMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-model',
         50,
-        'output',
+        { model: 'test-model', type: 'output' },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
@@ -625,11 +630,13 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordToolCallMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-function',
         100,
-        true,
-        ToolCallDecision.ACCEPT,
-        'native',
+        {
+          function_name: 'test-function',
+          success: true,
+          decision: ToolCallDecision.ACCEPT,
+          tool_type: 'native',
+        },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
@@ -696,11 +703,13 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordToolCallMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-function',
         100,
-        false,
-        ToolCallDecision.REJECT,
-        'native',
+        {
+          function_name: 'test-function',
+          success: false,
+          decision: ToolCallDecision.REJECT,
+          tool_type: 'native',
+        },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
@@ -770,11 +779,13 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordToolCallMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-function',
         100,
-        true,
-        ToolCallDecision.MODIFY,
-        'native',
+        {
+          function_name: 'test-function',
+          success: true,
+          decision: ToolCallDecision.MODIFY,
+          tool_type: 'native',
+        },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
@@ -843,11 +854,13 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordToolCallMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-function',
         100,
-        true,
-        undefined,
-        'native',
+        {
+          function_name: 'test-function',
+          success: true,
+          decision: undefined,
+          tool_type: 'native',
+        },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
@@ -917,17 +930,88 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordToolCallMetrics).toHaveBeenCalledWith(
         mockConfig,
-        'test-function',
         100,
-        false,
-        undefined,
-        'native',
+        {
+          function_name: 'test-function',
+          success: false,
+          decision: undefined,
+          tool_type: 'native',
+        },
       );
 
       expect(mockUiEvent.addEvent).toHaveBeenCalledWith({
         ...event,
         'event.name': EVENT_TOOL_CALL,
         'event.timestamp': '2025-01-01T00:00:00.000Z',
+      });
+    });
+
+    it('should log a tool call with mcp_server_name for MCP tools', () => {
+      const mockMcpTool = new DiscoveredMCPTool(
+        {} as CallableTool,
+        'mock_mcp_server',
+        'mock_mcp_tool',
+        'tool description',
+        {
+          type: 'object',
+          properties: {
+            arg1: { type: 'string' },
+            arg2: { type: 'number' },
+          },
+          required: ['arg1', 'arg2'],
+        },
+      );
+
+      const call: CompletedToolCall = {
+        status: 'success',
+        request: {
+          name: 'mock_mcp_tool',
+          args: { arg1: 'value1', arg2: 2 },
+          callId: 'test-call-id',
+          isClientInitiated: true,
+          prompt_id: 'prompt-id',
+        },
+        response: {
+          callId: 'test-call-id',
+          responseParts: [{ text: 'test-response' }],
+          resultDisplay: undefined,
+          error: undefined,
+          errorType: undefined,
+        },
+        tool: mockMcpTool,
+        invocation: {} as AnyToolInvocation,
+        durationMs: 100,
+      };
+      const event = new ToolCallEvent(call);
+
+      logToolCall(mockConfig, event);
+
+      expect(mockLogger.emit).toHaveBeenCalledWith({
+        body: 'Tool call: mock_mcp_tool. Success: true. Duration: 100ms.',
+        attributes: {
+          'session.id': 'test-session-id',
+          'user.email': 'test-user@example.com',
+          'event.name': EVENT_TOOL_CALL,
+          'event.timestamp': '2025-01-01T00:00:00.000Z',
+          function_name: 'mock_mcp_tool',
+          function_args: JSON.stringify(
+            {
+              arg1: 'value1',
+              arg2: 2,
+            },
+            null,
+            2,
+          ),
+          duration_ms: 100,
+          success: true,
+          prompt_id: 'prompt-id',
+          tool_type: 'mcp',
+          mcp_server_name: 'mock_mcp_server',
+          decision: undefined,
+          error: undefined,
+          error_type: undefined,
+          metadata: undefined,
+        },
       });
     });
   });
@@ -1009,11 +1093,13 @@ describe('loggers', () => {
 
       expect(mockMetrics.recordFileOperationMetric).toHaveBeenCalledWith(
         mockConfig,
-        'read',
-        10,
-        'text/plain',
-        '.txt',
-        'typescript',
+        {
+          operation: 'read',
+          lines: 10,
+          mimetype: 'text/plain',
+          extension: '.txt',
+          programming_language: 'typescript',
+        },
       );
     });
   });
@@ -1228,6 +1314,43 @@ describe('loggers', () => {
           'session.id': 'test-session-id',
           'user.email': 'test-user@example.com',
           'event.name': EVENT_EXTENSION_ENABLE,
+          'event.timestamp': '2025-01-01T00:00:00.000Z',
+          extension_name: 'vscode',
+          setting_scope: 'user',
+        },
+      });
+    });
+  });
+
+  describe('logExtensionDisable', () => {
+    const mockConfig = {
+      getSessionId: () => 'test-session-id',
+      getUsageStatisticsEnabled: () => true,
+    } as unknown as Config;
+
+    beforeEach(() => {
+      vi.spyOn(ClearcutLogger.prototype, 'logExtensionDisableEvent');
+    });
+
+    afterEach(() => {
+      vi.resetAllMocks();
+    });
+
+    it('should log extension disable event', () => {
+      const event = new ExtensionDisableEvent('vscode', 'user');
+
+      logExtensionDisable(mockConfig, event);
+
+      expect(
+        ClearcutLogger.prototype.logExtensionDisableEvent,
+      ).toHaveBeenCalledWith(event);
+
+      expect(mockLogger.emit).toHaveBeenCalledWith({
+        body: 'Disabled extension vscode',
+        attributes: {
+          'session.id': 'test-session-id',
+          'user.email': 'test-user@example.com',
+          'event.name': EVENT_EXTENSION_DISABLE,
           'event.timestamp': '2025-01-01T00:00:00.000Z',
           extension_name: 'vscode',
           setting_scope: 'user',
