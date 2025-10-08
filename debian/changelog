@@ -1,3 +1,10 @@
+gemini-cli (0.8.1-0kali1) kali-dev; urgency=medium
+
+  * New upstream version 0.8.1
+  * Refresh patches
+
+ -- Sophie Brun <sophie@kali.org>  Wed, 08 Oct 2025 11:21:10 +0200
+
 gemini-cli (0.6.1-0kali1) kali-dev; urgency=medium
 
   * CI: disable build on i386
