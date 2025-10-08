@@ -15,8 +15,9 @@ import * as os from 'node:os';
 import * as https from 'node:https';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { loadExtension } from '../extension.js';
+import { EXTENSIONS_CONFIG_FILENAME, loadExtension } from '../extension.js';
+import * as tar from 'tar';
+import extract from 'extract-zip';
 
 function getGitHubToken(): string | undefined {
   return process.env['GITHUB_TOKEN'];
@@ -86,7 +87,7 @@ export function parseGitHubRepoForReleases(source: string): {
   const parsedUrl = URL.parse(source, 'https://github.com');
   // The pathname should be "/owner/repo".
   const parts = parsedUrl?.pathname.substring(1).split('/');
-  if (parts?.length !== 2) {
+  if (parts?.length !== 2 || parsedUrl?.host !== 'github.com') {
     throw new Error(
       `Invalid GitHub repository source: ${source}. Expected "owner/repo" or a github repo uri.`,
     );
@@ -270,7 +271,35 @@ export async function downloadFromGitHubRelease(
 
     await downloadFile(archiveUrl, downloadedAssetPath);
 
-    extractFile(downloadedAssetPath, destination);
+    await extractFile(downloadedAssetPath, destination);
+
+    // For regular github releases, the repository is put inside of a top level
+    // directory. In this case we should see exactly two file in the destination
+    // dir, the archive and the directory. If we see that, validate that the
+    // dir has a gemini extension configuration file and then move all files
+    // from the directory up one level into the destination directory.
+    const entries = await fs.promises.readdir(destination, {
+      withFileTypes: true,
+    });
+    if (entries.length === 2) {
+      const lonelyDir = entries.find((entry) => entry.isDirectory());
+      if (
+        lonelyDir &&
+        fs.existsSync(
+          path.join(destination, lonelyDir.name, EXTENSIONS_CONFIG_FILENAME),
+        )
+      ) {
+        const dirPathToExtract = path.join(destination, lonelyDir.name);
+        const extractedDirFiles = await fs.promises.readdir(dirPathToExtract);
+        for (const file of extractedDirFiles) {
+          await fs.promises.rename(
+            path.join(dirPathToExtract, file),
+            path.join(destination, file),
+          );
+        }
+        await fs.promises.rmdir(dirPathToExtract);
+      }
+    }
 
     await fs.promises.unlink(downloadedAssetPath);
     return {
@@ -388,24 +417,15 @@ async function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
-function extractFile(file: string, dest: string) {
-  let args: string[];
+export async function extractFile(file: string, dest: string): Promise<void> {
   if (file.endsWith('.tar.gz')) {
-    args = ['-xzf', file, '-C', dest];
+    await tar.x({
+      file,
+      cwd: dest,
+    });
   } else if (file.endsWith('.zip')) {
-    args = ['-xf', file, '-C', dest];
+    await extract(file, { dir: dest });
   } else {
     throw new Error(`Unsupported file extension for extraction: ${file}`);
-  }
-
-  const result = spawnSync('tar', args, { stdio: 'pipe' });
-
-  if (result.status !== 0) {
-    if (result.error) {
-      throw new Error(`Failed to spawn 'tar': ${result.error.message}`);
-    }
-    throw new Error(
-      `'tar' command failed with exit code ${result.status}: ${result.stderr.toString()}`,
-    );
   }
 }

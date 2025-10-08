@@ -38,7 +38,7 @@ export interface ToolMessageProps extends IndividualToolCallDisplay {
   emphasis?: TextEmphasis;
   renderOutputAsMarkdown?: boolean;
   activeShellPtyId?: number | null;
-  shellFocused?: boolean;
+  embeddedShellFocused?: boolean;
   config?: Config;
 }
 
@@ -52,7 +52,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
   emphasis = 'medium',
   renderOutputAsMarkdown = true,
   activeShellPtyId,
-  shellFocused,
+  embeddedShellFocused,
   ptyId,
   config,
 }) => {
@@ -60,12 +60,43 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
     (name === SHELL_COMMAND_NAME || name === 'Shell') &&
     status === ToolCallStatus.Executing &&
     ptyId === activeShellPtyId &&
-    shellFocused;
+    embeddedShellFocused;
+
+  const [lastUpdateTime, setLastUpdateTime] = React.useState<Date | null>(null);
+  const [userHasFocused, setUserHasFocused] = React.useState(false);
+  const [showFocusHint, setShowFocusHint] = React.useState(false);
+
+  React.useEffect(() => {
+    if (resultDisplay) {
+      setLastUpdateTime(new Date());
+    }
+  }, [resultDisplay]);
+
+  React.useEffect(() => {
+    if (!lastUpdateTime) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setShowFocusHint(true);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [lastUpdateTime]);
+
+  React.useEffect(() => {
+    if (isThisShellFocused) {
+      setUserHasFocused(true);
+    }
+  }, [isThisShellFocused]);
 
   const isThisShellFocusable =
     (name === SHELL_COMMAND_NAME || name === 'Shell') &&
     status === ToolCallStatus.Executing &&
     config?.getShouldUseNodePtyShell();
+
+  const shouldShowFocusHint =
+    isThisShellFocusable && (showFocusHint || userHasFocused);
 
   const availableHeight = availableTerminalHeight
     ? Math.max(
@@ -99,7 +130,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
           description={description}
           emphasis={emphasis}
         />
-        {isThisShellFocusable && (
+        {shouldShowFocusHint && (
           <Box marginLeft={1} flexShrink={0}>
             <Text color={theme.text.accent}>
               {isThisShellFocused ? '(Focused)' : '(ctrl+f to focus)'}
@@ -149,7 +180,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
         <Box paddingLeft={STATUS_INDICATOR_WIDTH} marginTop={1}>
           <ShellInputPrompt
             activeShellPtyId={activeShellPtyId ?? null}
-            focus={shellFocused}
+            focus={embeddedShellFocused}
           />
         </Box>
       )}
