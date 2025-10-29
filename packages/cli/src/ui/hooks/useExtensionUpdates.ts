@@ -18,8 +18,12 @@ import {
   checkForAllExtensionUpdates,
   updateExtension,
 } from '../../config/extensions/update.js';
-import { requestConsentInteractive } from '../../config/extension.js';
+import {
+  requestConsentInteractive,
+  type ExtensionUpdateInfo,
+} from '../../config/extension.js';
 import { checkExhaustive } from '../../utils/checks.js';
+import type { ExtensionEnablementManager } from '../../config/extensions/extensionEnablement.js';
 
 type ConfirmationRequestWrapper = {
   prompt: React.ReactNode;
@@ -41,12 +45,12 @@ function confirmationRequestsReducer(
       return state.filter((r) => r !== action.request);
     default:
       checkExhaustive(action);
-      return state;
   }
 }
 
 export const useExtensionUpdates = (
   extensions: GeminiCLIExtension[],
+  extensionEnablementManager: ExtensionEnablementManager,
   addItem: UseHistoryManagerReturn['addItem'],
   cwd: string,
 ) => {
@@ -80,41 +84,81 @@ export const useExtensionUpdates = (
   );
 
   useEffect(() => {
-    (async () => {
-      await checkForAllExtensionUpdates(
-        extensions,
-        dispatchExtensionStateUpdate,
+    const extensionsToCheck = extensions.filter((extension) => {
+      const currentStatus = extensionsUpdateState.extensionStatuses.get(
+        extension.name,
       );
-    })();
-  }, [extensions, extensions.length, dispatchExtensionStateUpdate]);
+      if (!currentStatus) return true;
+      const currentState = currentStatus.status;
+      return !currentState || currentState === ExtensionUpdateState.UNKNOWN;
+    });
+    if (extensionsToCheck.length === 0) return;
+    checkForAllExtensionUpdates(
+      extensionsToCheck,
+      extensionEnablementManager,
+      dispatchExtensionStateUpdate,
+      cwd,
+    );
+  }, [
+    extensions,
+    extensionEnablementManager,
+    extensionsUpdateState.extensionStatuses,
+    cwd,
+    dispatchExtensionStateUpdate,
+  ]);
 
   useEffect(() => {
     if (extensionsUpdateState.batchChecksInProgress > 0) {
       return;
     }
+    const scheduledUpdate = extensionsUpdateState.scheduledUpdate;
+    if (scheduledUpdate) {
+      dispatchExtensionStateUpdate({
+        type: 'CLEAR_SCHEDULED_UPDATE',
+      });
+    }
+
+    function shouldDoUpdate(extension: GeminiCLIExtension): boolean {
+      if (scheduledUpdate) {
+        if (scheduledUpdate.all) {
+          return true;
+        }
+        return scheduledUpdate.names?.includes(extension.name) === true;
+      } else {
+        return extension.installMetadata?.autoUpdate === true;
+      }
+    }
 
     let extensionsWithUpdatesCount = 0;
+    // We only notify if we have unprocessed extensions in the UPDATE_AVAILABLE
+    // state.
+    let shouldNotifyOfUpdates = false;
+    const updatePromises: Array<Promise<ExtensionUpdateInfo | undefined>> = [];
     for (const extension of extensions) {
       const currentState = extensionsUpdateState.extensionStatuses.get(
         extension.name,
       );
       if (
         !currentState ||
-        currentState.processed ||
         currentState.status !== ExtensionUpdateState.UPDATE_AVAILABLE
       ) {
         continue;
       }
-
-      // Mark as processed immediately to avoid re-triggering.
-      dispatchExtensionStateUpdate({
-        type: 'SET_PROCESSED',
-        payload: { name: extension.name, processed: true },
-      });
-
-      if (extension.installMetadata?.autoUpdate) {
-        updateExtension(
+      const shouldUpdate = shouldDoUpdate(extension);
+      if (!shouldUpdate) {
+        extensionsWithUpdatesCount++;
+        if (!currentState.notified) {
+          // Mark as processed immediately to avoid re-triggering.
+          dispatchExtensionStateUpdate({
+            type: 'SET_NOTIFIED',
+            payload: { name: extension.name, notified: true },
+          });
+          shouldNotifyOfUpdates = true;
+        }
+      } else {
+        const updatePromise = updateExtension(
           extension,
+          extensionEnablementManager,
           cwd,
           (description) =>
             requestConsentInteractive(
@@ -123,7 +167,9 @@ export const useExtensionUpdates = (
             ),
           currentState.status,
           dispatchExtensionStateUpdate,
-        )
+        );
+        updatePromises.push(updatePromise);
+        updatePromise
           .then((result) => {
             if (!result) return;
             addItem(
@@ -143,11 +189,9 @@ export const useExtensionUpdates = (
               Date.now(),
             );
           });
-      } else {
-        extensionsWithUpdatesCount++;
       }
     }
-    if (extensionsWithUpdatesCount > 0) {
+    if (shouldNotifyOfUpdates) {
       const s = extensionsWithUpdatesCount > 1 ? 's' : '';
       addItem(
         {
@@ -157,8 +201,21 @@ export const useExtensionUpdates = (
         Date.now(),
       );
     }
+    if (scheduledUpdate) {
+      Promise.all(updatePromises).then((results) => {
+        const nonNullResults = results.filter((result) => result != null);
+        scheduledUpdate.onCompleteCallbacks.forEach((callback) => {
+          try {
+            callback(nonNullResults);
+          } catch (e) {
+            console.error(getErrorMessage(e));
+          }
+        });
+      });
+    }
   }, [
     extensions,
+    extensionEnablementManager,
     extensionsUpdateState,
     addConfirmUpdateExtensionRequest,
     addItem,
