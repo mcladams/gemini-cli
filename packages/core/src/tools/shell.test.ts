@@ -232,30 +232,34 @@ describe('ShellTool', () => {
       );
     });
 
-    itWindowsOnly('should not wrap command on windows', async () => {
-      vi.mocked(os.platform).mockReturnValue('win32');
-      const invocation = shellTool.build({ command: 'dir' });
-      const promise = invocation.execute(mockAbortSignal);
-      resolveShellExecution({
-        rawOutput: Buffer.from(''),
-        output: '',
-        exitCode: 0,
-        signal: null,
-        error: null,
-        aborted: false,
-        pid: 12345,
-        executionMethod: 'child_process',
-      });
-      await promise;
-      expect(mockShellExecutionService).toHaveBeenCalledWith(
-        'dir',
-        '/test/dir',
-        expect.any(Function),
-        mockAbortSignal,
-        false,
-        {},
-      );
-    });
+    itWindowsOnly(
+      'should not wrap command on windows',
+      async () => {
+        vi.mocked(os.platform).mockReturnValue('win32');
+        const invocation = shellTool.build({ command: 'dir' });
+        const promise = invocation.execute(mockAbortSignal);
+        resolveShellExecution({
+          rawOutput: Buffer.from(''),
+          output: '',
+          exitCode: 0,
+          signal: null,
+          error: null,
+          aborted: false,
+          pid: 12345,
+          executionMethod: 'child_process',
+        });
+        await promise;
+        expect(mockShellExecutionService).toHaveBeenCalledWith(
+          'dir',
+          '/test/dir',
+          expect.any(Function),
+          mockAbortSignal,
+          false,
+          {},
+        );
+      },
+      20000,
+    );
 
     it('should format error messages correctly', async () => {
       const error = new Error('wrapped command failed');
@@ -479,6 +483,18 @@ describe('ShellTool', () => {
         await expect(
           invocation.shouldConfirmExecute(new AbortController().signal),
         ).rejects.toThrow('wc');
+      });
+
+      it('should require all segments of a chained command to be allowlisted', async () => {
+        (mockConfig.getAllowedTools as Mock).mockReturnValue([
+          'ShellTool(echo)',
+        ]);
+        const invocation = shellTool.build({ command: 'echo "foo" && ls -l' });
+        await expect(
+          invocation.shouldConfirmExecute(new AbortController().signal),
+        ).rejects.toThrow(
+          'Command "echo "foo" && ls -l" is not in the list of allowed tools for non-interactive mode.',
+        );
       });
     });
   });
