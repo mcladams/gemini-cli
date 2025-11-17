@@ -123,6 +123,8 @@ export interface UIState {
   embeddedShellFocused: boolean;
   showDebugProfiler: boolean;
   showFullTodos: boolean;
+  copyModeEnabled: boolean;
+  warningMessage: string | null;
 }
 
 export const UIStateContext = createContext<UIState | null>(null);

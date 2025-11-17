@@ -4,19 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { render } from '../../../test-utils/render.js';
+import { renderWithProviders } from '../../../test-utils/render.js';
 import { describe, it, expect, vi } from 'vitest';
-import { Text } from 'ink';
-import type React from 'react';
 import { ToolGroupMessage } from './ToolGroupMessage.js';
 import type { IndividualToolCallDisplay } from '../../types.js';
 import { ToolCallStatus } from '../../types.js';
-import type {
-  Config,
-  ToolCallConfirmationDetails,
-} from '@google/gemini-cli-core';
+import type { ToolCallConfirmationDetails } from '@google/gemini-cli-core';
 import { TOOL_STATUS } from '../../constants.js';
-import { ConfigContext } from '../../contexts/ConfigContext.js';
+import { Scrollable } from '../shared/Scrollable.js';
+import { Text } from 'ink';
 
 // Mock child components to isolate ToolGroupMessage behavior
 vi.mock('./ToolMessage.js', () => ({
@@ -66,8 +62,6 @@ vi.mock('./ToolConfirmationMessage.js', () => ({
 }));
 
 describe('<ToolGroupMessage />', () => {
-  const mockConfig: Config = {} as Config;
-
   const createToolCall = (
     overrides: Partial<IndividualToolCallDisplay> = {},
   ): IndividualToolCallDisplay => ({
@@ -86,14 +80,6 @@ describe('<ToolGroupMessage />', () => {
     terminalWidth: 80,
     isFocused: true,
   };
-
-  // Helper to wrap component with required providers
-  const renderWithProviders = (component: React.ReactElement) =>
-    render(
-      <ConfigContext.Provider value={mockConfig}>
-        {component}
-      </ConfigContext.Provider>,
-    );
 
   describe('Golden Snapshots', () => {
     it('renders single successful tool call', () => {
@@ -261,6 +247,76 @@ describe('<ToolGroupMessage />', () => {
     it('renders empty tool calls array', () => {
       const { lastFrame, unmount } = renderWithProviders(
         <ToolGroupMessage {...baseProps} toolCalls={[]} />,
+      );
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    });
+
+    it('renders header when scrolled', () => {
+      const toolCalls = [
+        createToolCall({
+          callId: '1',
+          name: 'tool-1',
+          description:
+            'Description 1. This is a long description that will need to be truncated if the terminal width is small.',
+          resultDisplay: 'line1\nline2\nline3\nline4\nline5',
+        }),
+        createToolCall({
+          callId: '2',
+          name: 'tool-2',
+          description: 'Description 2',
+          resultDisplay: 'line1\nline2',
+        }),
+      ];
+      const { lastFrame, unmount } = renderWithProviders(
+        <Scrollable height={10} hasFocus={true} scrollToBottom={true}>
+          <ToolGroupMessage {...baseProps} toolCalls={toolCalls} />
+        </Scrollable>,
+      );
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    });
+
+    it('renders tool call with outputFile', () => {
+      const toolCalls = [
+        createToolCall({
+          callId: 'tool-output-file',
+          name: 'tool-with-file',
+          description: 'Tool that saved output to file',
+          status: ToolCallStatus.Success,
+          outputFile: '/path/to/output.txt',
+        }),
+      ];
+      const { lastFrame, unmount } = renderWithProviders(
+        <ToolGroupMessage {...baseProps} toolCalls={toolCalls} />,
+      );
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    });
+
+    it('renders two tool groups where only the last line of the previous group is visible', () => {
+      const toolCalls1 = [
+        createToolCall({
+          callId: '1',
+          name: 'tool-1',
+          description: 'Description 1',
+          resultDisplay: 'line1\nline2\nline3\nline4\nline5',
+        }),
+      ];
+      const toolCalls2 = [
+        createToolCall({
+          callId: '2',
+          name: 'tool-2',
+          description: 'Description 2',
+          resultDisplay: 'line1',
+        }),
+      ];
+
+      const { lastFrame, unmount } = renderWithProviders(
+        <Scrollable height={6} hasFocus={true} scrollToBottom={true}>
+          <ToolGroupMessage {...baseProps} toolCalls={toolCalls1} />
+          <ToolGroupMessage {...baseProps} toolCalls={toolCalls2} />
+        </Scrollable>,
       );
       expect(lastFrame()).toMatchSnapshot();
       unmount();

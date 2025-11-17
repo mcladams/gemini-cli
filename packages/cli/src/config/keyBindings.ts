@@ -25,6 +25,14 @@ export enum Command {
   // Screen control
   CLEAR_SCREEN = 'clearScreen',
 
+  // Scrolling
+  SCROLL_UP = 'scrollUp',
+  SCROLL_DOWN = 'scrollDown',
+  SCROLL_HOME = 'scrollHome',
+  SCROLL_END = 'scrollEnd',
+  PAGE_UP = 'pageUp',
+  PAGE_DOWN = 'pageDown',
+
   // History navigation
   HISTORY_UP = 'historyUp',
   HISTORY_DOWN = 'historyDown',
@@ -119,6 +127,14 @@ export const defaultKeyBindings: KeyBindingConfig = {
 
   // Screen control
   [Command.CLEAR_SCREEN]: [{ key: 'l', ctrl: true }],
+
+  // Scrolling
+  [Command.SCROLL_UP]: [{ key: 'up', shift: true }],
+  [Command.SCROLL_DOWN]: [{ key: 'down', shift: true }],
+  [Command.SCROLL_HOME]: [{ key: 'home' }],
+  [Command.SCROLL_END]: [{ key: 'end' }],
+  [Command.PAGE_UP]: [{ key: 'pageup' }],
+  [Command.PAGE_DOWN]: [{ key: 'pagedown' }],
 
   // History navigation
   [Command.HISTORY_UP]: [{ key: 'p', ctrl: true, shift: false }],
