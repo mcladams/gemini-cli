@@ -7,7 +7,7 @@ Subject: Remove failing test
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/packages/cli/src/ui/components/SettingsDialog.test.tsx b/packages/cli/src/ui/components/SettingsDialog.test.tsx
-index 501e14e..8287b72 100644
+index 884bc21..db08085 100644
 --- a/packages/cli/src/ui/components/SettingsDialog.test.tsx
 +++ b/packages/cli/src/ui/components/SettingsDialog.test.tsx
 @@ -507,7 +507,7 @@ describe('SettingsDialog', () => {
