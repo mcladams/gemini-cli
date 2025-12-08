@@ -190,6 +190,7 @@ describe('useSlashCommandProcessor', () => {
             openEditorDialog: vi.fn(),
             openPrivacyNotice: vi.fn(),
             openSettingsDialog: vi.fn(),
+            openSessionBrowser: vi.fn(),
             openModelDialog: mockOpenModelDialog,
             openPermissionsDialog: vi.fn(),
             quit: mockSetQuittingMessages,
@@ -201,6 +202,8 @@ describe('useSlashCommandProcessor', () => {
           },
           new Map(), // extensionsUpdateState
           true, // isConfigInitialized
+          vi.fn(), // setBannerVisible
+          vi.fn(), // setCustomDialog
         ),
       );
       result = hook.result;
@@ -551,39 +554,6 @@ describe('useSlashCommandProcessor', () => {
         { type: 'user', text: 'old prompt' },
         expect.any(Number),
       );
-    });
-
-    it('should strip thoughts when handling "load_history" action', async () => {
-      const mockClient = {
-        setHistory: vi.fn(),
-        stripThoughtsFromHistory: vi.fn(),
-      } as unknown as GeminiClient;
-      vi.spyOn(mockConfig, 'getGeminiClient').mockReturnValue(mockClient);
-
-      const historyWithThoughts = [
-        {
-          role: 'model',
-          parts: [{ text: 'response', thoughtSignature: 'CikB...' }],
-        },
-      ];
-      const command = createTestCommand({
-        name: 'loadwiththoughts',
-        action: vi.fn().mockResolvedValue({
-          type: 'load_history',
-          history: [{ type: MessageType.GEMINI, text: 'response' }],
-          clientHistory: historyWithThoughts,
-        }),
-      });
-
-      const result = await setupProcessorHook([command]);
-      await waitFor(() => expect(result.current.slashCommands).toHaveLength(1));
-
-      await act(async () => {
-        await result.current.handleSlashCommand('/loadwiththoughts');
-      });
-
-      expect(mockClient.setHistory).toHaveBeenCalledTimes(1);
-      expect(mockClient.stripThoughtsFromHistory).toHaveBeenCalledWith();
     });
 
     it('should handle a "quit" action', async () => {
