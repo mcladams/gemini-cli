@@ -9,57 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ToolGroupMessage } from './ToolGroupMessage.js';
 import type { IndividualToolCallDisplay } from '../../types.js';
 import { ToolCallStatus } from '../../types.js';
-import type { ToolCallConfirmationDetails } from '@google/gemini-cli-core';
-import { TOOL_STATUS } from '../../constants.js';
 import { Scrollable } from '../shared/Scrollable.js';
-import { Text } from 'ink';
-
-// Mock child components to isolate ToolGroupMessage behavior
-vi.mock('./ToolMessage.js', () => ({
-  ToolMessage: function MockToolMessage({
-    callId,
-    name,
-    description,
-    status,
-    emphasis,
-  }: {
-    callId: string;
-    name: string;
-    description: string;
-    status: ToolCallStatus;
-    emphasis: string;
-  }) {
-    // Use the same constants as the real component
-    const statusSymbolMap: Record<ToolCallStatus, string> = {
-      [ToolCallStatus.Success]: TOOL_STATUS.SUCCESS,
-      [ToolCallStatus.Pending]: TOOL_STATUS.PENDING,
-      [ToolCallStatus.Executing]: TOOL_STATUS.EXECUTING,
-      [ToolCallStatus.Confirming]: TOOL_STATUS.CONFIRMING,
-      [ToolCallStatus.Canceled]: TOOL_STATUS.CANCELED,
-      [ToolCallStatus.Error]: TOOL_STATUS.ERROR,
-    };
-    const statusSymbol = statusSymbolMap[status] || '?';
-    return (
-      <Text>
-        MockTool[{callId}]: {statusSymbol} {name} - {description} ({emphasis})
-      </Text>
-    );
-  },
-}));
-
-vi.mock('./ToolConfirmationMessage.js', () => ({
-  ToolConfirmationMessage: function MockToolConfirmationMessage({
-    confirmationDetails,
-  }: {
-    confirmationDetails: ToolCallConfirmationDetails;
-  }) {
-    const displayText =
-      confirmationDetails?.type === 'info'
-        ? (confirmationDetails as { prompt: string }).prompt
-        : confirmationDetails?.title || 'confirm';
-    return <Text>MockConfirmation: {displayText}</Text>;
-  },
-}));
 
 describe('<ToolGroupMessage />', () => {
   const createToolCall = (
