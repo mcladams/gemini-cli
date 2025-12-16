@@ -1,3 +1,11 @@
+gemini-cli (0.20.2-0kali1) kali-dev; urgency=medium
+
+  * New upstream version 0.20.2
+  * Refresh patches
+  * Add a patch to fix build
+
+ -- Sophie Brun <sophie@kali.org>  Tue, 16 Dec 2025 16:17:46 +0100
+
 gemini-cli (0.19.4-0kali1) kali-dev; urgency=medium
 
   * New upstream version 0.19.4
