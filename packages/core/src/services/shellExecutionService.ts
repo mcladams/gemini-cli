@@ -116,28 +116,8 @@ const getFullBufferText = (terminal: pkg.Terminal): string => {
   const lines: string[] = [];
   for (let i = 0; i < buffer.length; i++) {
     const line = buffer.getLine(i);
-    if (!line) {
-      continue;
-    }
-    // If the NEXT line is wrapped, it means it's a continuation of THIS line.
-    // We should not trim the right side of this line because trailing spaces
-    // might be significant parts of the wrapped content.
-    // If it's not wrapped, we trim normally.
-    let trimRight = true;
-    if (i + 1 < buffer.length) {
-      const nextLine = buffer.getLine(i + 1);
-      if (nextLine?.isWrapped) {
-        trimRight = false;
-      }
-    }
-
-    const lineContent = line.translateToString(trimRight);
-
-    if (line.isWrapped && lines.length > 0) {
-      lines[lines.length - 1] += lineContent;
-    } else {
-      lines.push(lineContent);
-    }
+    const lineContent = line ? line.translateToString(true) : '';
+    lines.push(lineContent);
   }
 
   // Remove trailing empty lines
@@ -147,6 +127,58 @@ const getFullBufferText = (terminal: pkg.Terminal): string => {
 
   return lines.join('\n');
 };
+
+function getSanitizedEnv(): NodeJS.ProcessEnv {
+  const isRunningInGithub =
+    process.env['GITHUB_SHA'] || process.env['SURFACE'] === 'Github';
+
+  if (!isRunningInGithub) {
+    // For local runs, we want to preserve the user's full environment.
+    return { ...process.env };
+  }
+
+  // For CI runs (GitHub), we sanitize the environment for security.
+  const env: NodeJS.ProcessEnv = {};
+  const essentialVars = [
+    // Cross-platform
+    'PATH',
+    // Windows specific
+    'Path',
+    'SYSTEMROOT',
+    'SystemRoot',
+    'COMSPEC',
+    'ComSpec',
+    'PATHEXT',
+    'WINDIR',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'SYSTEMDRIVE',
+    'SystemDrive',
+    // Unix/Linux/macOS specific
+    'HOME',
+    'LANG',
+    'SHELL',
+    'TMPDIR',
+    'USER',
+    'LOGNAME',
+  ];
+
+  for (const key of essentialVars) {
+    if (process.env[key] !== undefined) {
+      env[key] = process.env[key];
+    }
+  }
+
+  // Always carry over test-specific variables for our own integration tests.
+  for (const key in process.env) {
+    if (key.startsWith('GEMINI_CLI_TEST')) {
+      env[key] = process.env[key];
+    }
+  }
+
+  return env;
+}
 
 /**
  * A centralized service for executing shell commands with robust process
@@ -249,10 +281,11 @@ export class ShellExecutionService {
         shell: false,
         detached: !isWindows,
         env: {
-          ...process.env,
+          ...getSanitizedEnv(),
           GEMINI_CLI: '1',
           TERM: 'xterm-256color',
           PAGER: 'cat',
+          GIT_PAGER: 'cat',
         },
       });
 
@@ -462,10 +495,11 @@ export class ShellExecutionService {
         cols,
         rows,
         env: {
-          ...process.env,
+          ...getSanitizedEnv(),
           GEMINI_CLI: '1',
           TERM: 'xterm-256color',
           PAGER: shellExecutionConfig.pager ?? 'cat',
+          GIT_PAGER: shellExecutionConfig.pager ?? 'cat',
         },
         handleFlowControl: true,
       });
