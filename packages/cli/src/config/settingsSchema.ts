@@ -930,6 +930,16 @@ const SETTINGS_SCHEMA = {
             description: 'Show color in shell output.',
             showInDialog: true,
           },
+          inactivityTimeout: {
+            type: 'number',
+            label: 'Inactivity Timeout',
+            category: 'Tools',
+            requiresRestart: false,
+            default: 300,
+            description:
+              'The maximum time in seconds allowed without output from the shell command. Defaults to 5 minutes.',
+            showInDialog: false,
+          },
         },
       },
       autoAccept: {
@@ -1298,6 +1308,15 @@ const SETTINGS_SCHEMA = {
         requiresRestart: true,
         default: false,
         description: 'Enable model routing using new availability service.',
+        showInDialog: false,
+      },
+      jitContext: {
+        type: 'boolean',
+        label: 'JIT Context Loading',
+        category: 'Experimental',
+        requiresRestart: true,
+        default: false,
+        description: 'Enable Just-In-Time (JIT) context loading.',
         showInDialog: false,
       },
       codebaseInvestigatorSettings: {

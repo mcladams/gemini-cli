@@ -47,6 +47,7 @@ export * from './core/apiKeyCredentialStorage.js';
 export * from './utils/paths.js';
 export * from './utils/schemaValidator.js';
 export * from './utils/errors.js';
+export * from './utils/exitCodes.js';
 export * from './utils/getFolderStructure.js';
 export * from './utils/memoryDiscovery.js';
 export * from './utils/getPty.js';
@@ -81,6 +82,7 @@ export * from './services/fileDiscoveryService.js';
 export * from './services/gitService.js';
 export * from './services/chatRecordingService.js';
 export * from './services/fileSystemService.js';
+export * from './services/contextManager.js';
 
 // Export IDE specific logic
 export * from './ide/ide-client.js';
