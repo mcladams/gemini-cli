@@ -2,7 +2,6 @@ From: Sophie Brun <sophie@kali.org>
 Date: Tue, 16 Dec 2025 17:01:26 +0100
 Subject: Fix build
 
-
 The build fails with:
   make run-npx          - Run the CLI using npx (for testing the published package)
   make create-alias     - Create a 'gemini' alias for your shell
@@ -22,7 +21,7 @@ make[1]: *** [debian/rules:17: execute_after_dh_auto_build] Error 1
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/package.json b/package.json
-index c5559c0..b4541f3 100644
+index 905558e..0dec0be 100644
 --- a/package.json
 +++ b/package.json
 @@ -62,7 +62,7 @@
@@ -44,7 +43,7 @@ index c5559c0..b4541f3 100644
      "simple-git": "^3.28.0"
    },
 diff --git a/packages/cli/package.json b/packages/cli/package.json
-index 3c50654..b7e0333 100644
+index 7e560b8..0a24204 100644
 --- a/packages/cli/package.json
 +++ b/packages/cli/package.json
 @@ -31,6 +31,7 @@
