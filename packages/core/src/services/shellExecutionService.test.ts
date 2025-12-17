@@ -83,6 +83,26 @@ const shellExecutionConfig: ShellExecutionConfig = {
   disableDynamicLineTrimming: true,
 };
 
+const createMockSerializeTerminalToObjectReturnValue = (
+  text: string | string[],
+): AnsiOutput => {
+  const lines = Array.isArray(text) ? text : text.split('\n');
+  const len = (shellExecutionConfig.terminalHeight ?? 24) as number;
+  const expected: AnsiOutput = Array.from({ length: len }, (_, i) => [
+    {
+      text: (lines[i] || '').trim(),
+      bold: false,
+      italic: false,
+      underline: false,
+      dim: false,
+      inverse: false,
+      fg: '#ffffff',
+      bg: '#000000',
+    },
+  ]);
+  return expected;
+};
+
 const createExpectedAnsiOutput = (text: string | string[]): AnsiOutput => {
   const lines = Array.isArray(text) ? text : text.split('\n');
   const len = (shellExecutionConfig.terminalHeight ?? 24) as number;
@@ -123,7 +143,7 @@ describe('ShellExecutionService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-
+    mockSerializeTerminalToObject.mockReturnValue([]);
     mockIsBinary.mockReturnValue(false);
     mockPlatform.mockReturnValue('linux');
     mockGetPty.mockResolvedValue({
@@ -188,6 +208,9 @@ describe('ShellExecutionService', () => {
 
   describe('Successful Execution', () => {
     it('should execute a command and capture output', async () => {
+      mockSerializeTerminalToObject.mockReturnValue(
+        createMockSerializeTerminalToObjectReturnValue('file1.txt'),
+      );
       const { result, handle } = await simulateExecution('ls -l', (pty) => {
         pty.onData.mock.calls[0][0]('file1.txt\n');
         pty.onExit.mock.calls[0][0]({ exitCode: 0, signal: null });
@@ -214,7 +237,10 @@ describe('ShellExecutionService', () => {
       });
     });
 
-    it('should strip ANSI codes from output', async () => {
+    it('should strip ANSI color codes from output', async () => {
+      mockSerializeTerminalToObject.mockReturnValue(
+        createMockSerializeTerminalToObjectReturnValue('aredword'),
+      );
       const { result } = await simulateExecution('ls --color=auto', (pty) => {
         pty.onData.mock.calls[0][0]('a\u001b[31mred\u001b[0mword');
         pty.onExit.mock.calls[0][0]({ exitCode: 0, signal: null });
@@ -240,6 +266,9 @@ describe('ShellExecutionService', () => {
     });
 
     it('should handle commands with no output', async () => {
+      mockSerializeTerminalToObject.mockReturnValue(
+        createMockSerializeTerminalToObjectReturnValue(''),
+      );
       await simulateExecution('touch file', (pty) => {
         pty.onExit.mock.calls[0][0]({ exitCode: 0, signal: null });
       });
@@ -282,6 +311,24 @@ describe('ShellExecutionService', () => {
       expect(result.output.split('\n').length).toBeGreaterThanOrEqual(
         lineCount,
       );
+    });
+
+    it('should not wrap long lines in the final output', async () => {
+      // Set a small width to force wrapping
+      const narrowConfig = { ...shellExecutionConfig, terminalWidth: 10 };
+      const longString = '123456789012345'; // 15 chars, should wrap at 10
+
+      const { result } = await simulateExecution(
+        'long-line-command',
+        (pty) => {
+          pty.onData.mock.calls[0][0](longString);
+          pty.onExit.mock.calls[0][0]({ exitCode: 0, signal: null });
+        },
+        narrowConfig,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output.trim()).toBe(longString);
     });
 
     it('should not add extra padding but preserve explicit trailing whitespace', async () => {
@@ -702,6 +749,9 @@ describe('ShellExecutionService', () => {
     });
 
     it('should call onOutputEvent with AnsiOutput when showColor is false', async () => {
+      mockSerializeTerminalToObject.mockReturnValue(
+        createMockSerializeTerminalToObjectReturnValue('aredword'),
+      );
       await simulateExecution(
         'ls --color=auto',
         (pty) => {
@@ -726,6 +776,13 @@ describe('ShellExecutionService', () => {
     });
 
     it('should handle multi-line output correctly when showColor is false', async () => {
+      mockSerializeTerminalToObject.mockReturnValue(
+        createMockSerializeTerminalToObjectReturnValue([
+          'line 1',
+          'line 2',
+          'line 3',
+        ]),
+      );
       await simulateExecution(
         'ls --color=auto',
         (pty) => {
@@ -831,7 +888,7 @@ describe('ShellExecutionService child_process fallback', () => {
       });
     });
 
-    it('should strip ANSI codes from output', async () => {
+    it('should strip ANSI color codes from output', async () => {
       const { result } = await simulateExecution('ls --color=auto', (cp) => {
         cp.stdout?.emit('data', Buffer.from('a\u001b[31mred\u001b[0mword'));
         cp.emit('exit', 0, null);
@@ -1170,6 +1227,7 @@ describe('ShellExecutionService execution method selection', () => {
   });
 
   it('should use node-pty when shouldUseNodePty is true and pty is available', async () => {
+    mockSerializeTerminalToObject.mockReturnValue([]);
     const abortController = new AbortController();
     const handle = await ShellExecutionService.execute(
       'test command',
