@@ -116,8 +116,28 @@ const getFullBufferText = (terminal: pkg.Terminal): string => {
   const lines: string[] = [];
   for (let i = 0; i < buffer.length; i++) {
     const line = buffer.getLine(i);
-    const lineContent = line ? line.translateToString(true) : '';
-    lines.push(lineContent);
+    if (!line) {
+      continue;
+    }
+    // If the NEXT line is wrapped, it means it's a continuation of THIS line.
+    // We should not trim the right side of this line because trailing spaces
+    // might be significant parts of the wrapped content.
+    // If it's not wrapped, we trim normally.
+    let trimRight = true;
+    if (i + 1 < buffer.length) {
+      const nextLine = buffer.getLine(i + 1);
+      if (nextLine?.isWrapped) {
+        trimRight = false;
+      }
+    }
+
+    const lineContent = line.translateToString(trimRight);
+
+    if (line.isWrapped && lines.length > 0) {
+      lines[lines.length - 1] += lineContent;
+    } else {
+      lines.push(lineContent);
+    }
   }
 
   // Remove trailing empty lines
@@ -551,24 +571,14 @@ export class ShellExecutionService {
           if (shellExecutionConfig.showColor) {
             newOutput = serializeTerminalToObject(headlessTerminal);
           } else {
-            const lines: AnsiOutput = [];
-            for (let y = 0; y < headlessTerminal.rows; y++) {
-              const line = buffer.getLine(buffer.viewportY + y);
-              const lineContent = line ? line.translateToString(true) : '';
-              lines.push([
-                {
-                  text: lineContent,
-                  bold: false,
-                  italic: false,
-                  underline: false,
-                  dim: false,
-                  inverse: false,
-                  fg: '',
-                  bg: '',
-                },
-              ]);
-            }
-            newOutput = lines;
+            newOutput = (serializeTerminalToObject(headlessTerminal) || []).map(
+              (line) =>
+                line.map((token) => {
+                  token.fg = '';
+                  token.bg = '';
+                  return token;
+                }),
+            );
           }
 
           let lastNonEmptyLine = -1;
@@ -727,6 +737,7 @@ export class ShellExecutionService {
               });
             });
 
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
             Promise.race([processingComplete, abortFired]).then(() => {
               finalize();
             });
