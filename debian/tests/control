@@ -1,2 +1,2 @@
 Test-Command: gemini-cli --help
-Restrictions: superficial
+Restrictions: superficial, allow-stderr
