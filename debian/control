@@ -7,7 +7,7 @@ Build-Depends:
  ca-certificates,
  debhelper-compat (= 13),
  npm,
-Standards-Version: 4.7.2
+Standards-Version: 4.7.3
 Homepage: https://github.com/google-gemini/gemini-cli
 Vcs-Browser: https://gitlab.com/kalilinux/packages/gemini-cli
 Vcs-Git: https://gitlab.com/kalilinux/packages/gemini-cli.git
