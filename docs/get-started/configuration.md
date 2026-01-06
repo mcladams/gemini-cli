@@ -367,6 +367,12 @@ their corresponding top-level category object in your `settings.json` file.
           "model": "gemini-3-pro-preview"
         }
       },
+      "gemini-3-flash-preview": {
+        "extends": "chat-base-3",
+        "modelConfig": {
+          "model": "gemini-3-flash-preview"
+        }
+      },
       "gemini-2.5-pro": {
         "extends": "chat-base-2.5",
         "modelConfig": {
@@ -496,6 +502,11 @@ their corresponding top-level category object in your `settings.json` file.
           "model": "gemini-3-pro-preview"
         }
       },
+      "chat-compression-3-flash": {
+        "modelConfig": {
+          "model": "gemini-3-flash-preview"
+        }
+      },
       "chat-compression-2.5-pro": {
         "modelConfig": {
           "model": "gemini-2.5-pro"
@@ -523,6 +534,11 @@ their corresponding top-level category object in your `settings.json` file.
   - **Description:** Custom named presets for model configs. These are merged
     with (and override) the built-in aliases.
   - **Default:** `{}`
+
+- **`modelConfigs.customOverrides`** (array):
+  - **Description:** Custom model config overrides. These are merged with (and
+    added to) the built-in overrides.
+  - **Default:** `[]`
 
 - **`modelConfigs.overrides`** (array):
   - **Description:** Apply specific configuration overrides based on matches,
@@ -715,6 +731,11 @@ their corresponding top-level category object in your `settings.json` file.
   - **Default:** `false`
   - **Requires restart:** Yes
 
+- **`security.enablePermanentToolApproval`** (boolean):
+  - **Description:** Enable the "Allow for all future sessions" option in tool
+    confirmation dialogs.
+  - **Default:** `false`
+
 - **`security.blockGitExtensions`** (boolean):
   - **Description:** Blocks installing and loading extensions from Git.
   - **Default:** `false`
@@ -816,7 +837,7 @@ their corresponding top-level category object in your `settings.json` file.
 
 - **`experimental.codebaseInvestigatorSettings.model`** (string):
   - **Description:** The model to use for the Codebase Investigator agent.
-  - **Default:** `"gemini-2.5-pro"`
+  - **Default:** `"auto"`
   - **Requires restart:** Yes
 
 #### `hooks`

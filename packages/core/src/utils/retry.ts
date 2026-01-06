@@ -6,7 +6,6 @@
 
 import type { GenerateContentResponse } from '@google/genai';
 import { ApiError } from '@google/genai';
-import { AuthType } from '../core/contentGenerator.js';
 import {
   TerminalQuotaError,
   RetryableQuotaError,
@@ -16,8 +15,6 @@ import { delay, createAbortError } from './delay.js';
 import { debugLogger } from './debugLogger.js';
 import { getErrorStatus, ModelNotFoundError } from './httpErrors.js';
 import type { RetryAvailabilityContext } from '../availability/modelPolicy.js';
-import { classifyFailureKind } from '../availability/errorClassification.js';
-import { applyAvailabilityTransition } from '../availability/policyHelpers.js';
 
 export type { RetryAvailabilityContext };
 
@@ -192,12 +189,6 @@ export async function retryWithBackoff<T>(
       }
 
       const classifiedError = classifyGoogleError(error);
-      const failureKind = classifyFailureKind(classifiedError);
-      const appliedImmediate =
-        failureKind === 'terminal' || failureKind === 'not_found';
-      if (appliedImmediate) {
-        applyAvailabilityTransition(getAvailabilityContext, failureKind);
-      }
 
       const errorCode = getErrorStatus(error);
 
@@ -205,7 +196,7 @@ export async function retryWithBackoff<T>(
         classifiedError instanceof TerminalQuotaError ||
         classifiedError instanceof ModelNotFoundError
       ) {
-        if (onPersistent429 && authType === AuthType.LOGIN_WITH_GOOGLE) {
+        if (onPersistent429) {
           try {
             const fallbackModel = await onPersistent429(
               authType,
@@ -229,7 +220,12 @@ export async function retryWithBackoff<T>(
 
       if (classifiedError instanceof RetryableQuotaError || is500) {
         if (attempt >= maxAttempts) {
-          if (onPersistent429 && authType === AuthType.LOGIN_WITH_GOOGLE) {
+          const errorMessage =
+            classifiedError instanceof Error ? classifiedError.message : '';
+          debugLogger.warn(
+            `Attempt ${attempt} failed${errorMessage ? `: ${errorMessage}` : ''}. Max attempts reached`,
+          );
+          if (onPersistent429) {
             try {
               const fallbackModel = await onPersistent429(
                 authType,
@@ -244,16 +240,16 @@ export async function retryWithBackoff<T>(
               console.warn('Model fallback failed:', fallbackError);
             }
           }
-          if (!appliedImmediate) {
-            applyAvailabilityTransition(getAvailabilityContext, failureKind);
-          }
           throw classifiedError instanceof RetryableQuotaError
             ? classifiedError
             : error;
         }
 
-        if (classifiedError instanceof RetryableQuotaError) {
-          console.warn(
+        if (
+          classifiedError instanceof RetryableQuotaError &&
+          classifiedError.retryDelayMs !== undefined
+        ) {
+          debugLogger.warn(
             `Attempt ${attempt} failed: ${classifiedError.message}. Retrying after ${classifiedError.retryDelayMs}ms...`,
           );
           await delay(classifiedError.retryDelayMs, signal);
@@ -276,9 +272,6 @@ export async function retryWithBackoff<T>(
         attempt >= maxAttempts ||
         !shouldRetryOnError(error as Error, retryFetchErrors)
       ) {
-        if (!appliedImmediate) {
-          applyAvailabilityTransition(getAvailabilityContext, failureKind);
-        }
         throw error;
       }
 
