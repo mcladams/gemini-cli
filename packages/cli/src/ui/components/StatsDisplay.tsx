@@ -21,20 +21,10 @@ import {
   CACHE_EFFICIENCY_MEDIUM,
 } from '../utils/displayUtils.js';
 import { computeSessionStats } from '../utils/computeStats.js';
-import type { RetrieveUserQuotaResponse } from '@google/gemini-cli-core';
 import {
-  DEFAULT_GEMINI_FLASH_LITE_MODEL,
-  DEFAULT_GEMINI_FLASH_MODEL,
-  DEFAULT_GEMINI_MODEL,
-  PREVIEW_GEMINI_MODEL,
+  type RetrieveUserQuotaResponse,
+  VALID_GEMINI_MODELS,
 } from '@google/gemini-cli-core';
-
-const VALID_GEMINI_MODELS = new Set([
-  PREVIEW_GEMINI_MODEL,
-  DEFAULT_GEMINI_MODEL,
-  DEFAULT_GEMINI_FLASH_MODEL,
-  DEFAULT_GEMINI_FLASH_LITE_MODEL,
-]);
 
 // A more flexible and powerful StatRow component
 interface StatRowProps {
@@ -75,7 +65,7 @@ interface SectionProps {
 }
 
 const Section: React.FC<SectionProps> = ({ title, children }) => (
-  <Box flexDirection="column" width="100%" marginBottom={1}>
+  <Box flexDirection="column" marginBottom={1}>
     <Text bold color={theme.text.primary}>
       {title}
     </Text>
@@ -95,15 +85,13 @@ const buildModelRows = (
   const activeRows = Object.entries(models).map(([name, metrics]) => {
     const modelName = getBaseModelName(name);
     const cachedTokens = metrics.tokens.cached;
-    const totalInputTokens = metrics.tokens.prompt;
-    const uncachedTokens = Math.max(0, totalInputTokens - cachedTokens);
+    const inputTokens = metrics.tokens.input;
     return {
       key: name,
       modelName,
       requests: metrics.api.totalRequests,
       cachedTokens: cachedTokens.toLocaleString(),
-      uncachedTokens: uncachedTokens.toLocaleString(),
-      totalInputTokens: totalInputTokens.toLocaleString(),
+      inputTokens: inputTokens.toLocaleString(),
       outputTokens: metrics.tokens.candidates.toLocaleString(),
       bucket: quotas?.buckets?.find((b) => b.modelId === modelName),
       isActive: true,
@@ -124,8 +112,7 @@ const buildModelRows = (
         modelName: bucket.modelId!,
         requests: '-',
         cachedTokens: '-',
-        uncachedTokens: '-',
-        totalInputTokens: '-',
+        inputTokens: '-',
         outputTokens: '-',
         bucket,
         isActive: false,
@@ -184,11 +171,18 @@ const ModelUsageTable: React.FC<{
     yellow: CACHE_EFFICIENCY_MEDIUM,
   });
 
+  const totalWidth =
+    nameWidth +
+    requestsWidth +
+    (showQuotaColumn
+      ? usageLimitWidth
+      : uncachedWidth + cachedWidth + outputTokensWidth);
+
   return (
     <Box flexDirection="column" marginTop={1}>
       {/* Header */}
       <Box alignItems="flex-end">
-        <Box width={nameWidth} flexGrow={1}>
+        <Box width={nameWidth}>
           <Text bold color={theme.text.primary} wrap="truncate-end">
             Model Usage
           </Text>
@@ -249,6 +243,7 @@ const ModelUsageTable: React.FC<{
           </Box>
         )}
       </Box>
+
       {/* Divider */}
       <Box
         borderStyle="round"
@@ -257,12 +252,12 @@ const ModelUsageTable: React.FC<{
         borderLeft={false}
         borderRight={false}
         borderColor={theme.border.default}
-        width="100%"
+        width={totalWidth}
       ></Box>
 
       {rows.map((row) => (
         <Box key={row.key}>
-          <Box width={nameWidth} flexGrow={1}>
+          <Box width={nameWidth}>
             <Text color={theme.text.primary} wrap="truncate-end">
               {row.modelName}
             </Text>
@@ -292,7 +287,7 @@ const ModelUsageTable: React.FC<{
                     row.isActive ? theme.text.primary : theme.text.secondary
                   }
                 >
-                  {row.uncachedTokens}
+                  {row.inputTokens}
                 </Text>
               </Box>
               <Box

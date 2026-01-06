@@ -10,6 +10,13 @@ import { makeFakeConfig } from '../test-utils/config.js';
 import type { AgentDefinition } from './types.js';
 import type { Config } from '../config/config.js';
 import { debugLogger } from '../utils/debugLogger.js';
+import {
+  DEFAULT_GEMINI_FLASH_LITE_MODEL,
+  GEMINI_MODEL_ALIAS_AUTO,
+  PREVIEW_GEMINI_FLASH_MODEL,
+  PREVIEW_GEMINI_MODEL,
+  PREVIEW_GEMINI_MODEL_AUTO,
+} from '../config/models.js';
 
 // A test-only subclass to expose the protected `registerAgent` method.
 class TestableAgentRegistry extends AgentRegistry {
@@ -70,6 +77,69 @@ describe('AgentRegistry', () => {
       const agentCount = debugRegistry.getAllDefinitions().length;
       expect(debugLogSpy).toHaveBeenCalledWith(
         `[AgentRegistry] Initialized with ${agentCount} agents.`,
+      );
+    });
+
+    it('should use preview flash model for codebase investigator if main model is preview pro', async () => {
+      const previewConfig = makeFakeConfig({
+        model: PREVIEW_GEMINI_MODEL,
+        codebaseInvestigatorSettings: {
+          enabled: true,
+          model: GEMINI_MODEL_ALIAS_AUTO,
+        },
+      });
+      const previewRegistry = new TestableAgentRegistry(previewConfig);
+
+      await previewRegistry.initialize();
+
+      const investigatorDef = previewRegistry.getDefinition(
+        'codebase_investigator',
+      );
+      expect(investigatorDef).toBeDefined();
+      expect(investigatorDef?.modelConfig.model).toBe(
+        PREVIEW_GEMINI_FLASH_MODEL,
+      );
+    });
+
+    it('should use preview flash model for codebase investigator if main model is preview auto', async () => {
+      const previewConfig = makeFakeConfig({
+        model: PREVIEW_GEMINI_MODEL_AUTO,
+        codebaseInvestigatorSettings: {
+          enabled: true,
+          model: GEMINI_MODEL_ALIAS_AUTO,
+        },
+      });
+      const previewRegistry = new TestableAgentRegistry(previewConfig);
+
+      await previewRegistry.initialize();
+
+      const investigatorDef = previewRegistry.getDefinition(
+        'codebase_investigator',
+      );
+      expect(investigatorDef).toBeDefined();
+      expect(investigatorDef?.modelConfig.model).toBe(
+        PREVIEW_GEMINI_FLASH_MODEL,
+      );
+    });
+
+    it('should use the model from the investigator settings', async () => {
+      const previewConfig = makeFakeConfig({
+        model: PREVIEW_GEMINI_MODEL,
+        codebaseInvestigatorSettings: {
+          enabled: true,
+          model: DEFAULT_GEMINI_FLASH_LITE_MODEL,
+        },
+      });
+      const previewRegistry = new TestableAgentRegistry(previewConfig);
+
+      await previewRegistry.initialize();
+
+      const investigatorDef = previewRegistry.getDefinition(
+        'codebase_investigator',
+      );
+      expect(investigatorDef).toBeDefined();
+      expect(investigatorDef?.modelConfig.model).toBe(
+        DEFAULT_GEMINI_FLASH_LITE_MODEL,
       );
     });
   });
@@ -215,6 +285,35 @@ describe('AgentRegistry', () => {
       expect(all).toHaveLength(2);
       expect(all).toEqual(
         expect.arrayContaining([MOCK_AGENT_V1, ANOTHER_AGENT]),
+      );
+    });
+  });
+  describe('getToolDescription', () => {
+    it('should return default message when no agents are registered', () => {
+      expect(registry.getToolDescription()).toContain(
+        'No agents are currently available',
+      );
+    });
+
+    it('should return formatted list of agents when agents are available', () => {
+      registry.testRegisterAgent(MOCK_AGENT_V1);
+      registry.testRegisterAgent({
+        ...MOCK_AGENT_V2,
+        name: 'AnotherAgent',
+        description: 'Another agent description',
+      });
+
+      const description = registry.getToolDescription();
+
+      expect(description).toContain(
+        'Delegates a task to a specialized sub-agent',
+      );
+      expect(description).toContain('Available agents:');
+      expect(description).toContain(
+        `- **${MOCK_AGENT_V1.name}**: ${MOCK_AGENT_V1.description}`,
+      );
+      expect(description).toContain(
+        `- **AnotherAgent**: Another agent description`,
       );
     });
   });
