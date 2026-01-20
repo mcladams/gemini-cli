@@ -47,15 +47,17 @@ const setCommand: CommandModule<object, SetArgs> = {
     const { name, setting, scope } = args;
     const { extension, extensionManager } = await getExtensionAndManager(name);
     if (!extension || !extensionManager) {
+      await exitCli();
       return;
     }
-    const extensionConfig = extensionManager.loadExtensionConfig(
+    const extensionConfig = await extensionManager.loadExtensionConfig(
       extension.path,
     );
     if (!extensionConfig) {
       debugLogger.error(
         `Could not find configuration for extension "${name}".`,
       );
+      await exitCli();
       return;
     }
     await updateSetting(
@@ -87,9 +89,10 @@ const listCommand: CommandModule<object, ListArgs> = {
     const { name } = args;
     const { extension, extensionManager } = await getExtensionAndManager(name);
     if (!extension || !extensionManager) {
+      await exitCli();
       return;
     }
-    const extensionConfig = extensionManager.loadExtensionConfig(
+    const extensionConfig = await extensionManager.loadExtensionConfig(
       extension.path,
     );
     if (
@@ -98,6 +101,7 @@ const listCommand: CommandModule<object, ListArgs> = {
       extensionConfig.settings.length === 0
     ) {
       debugLogger.log(`Extension "${name}" has no settings to configure.`);
+      await exitCli();
       return;
     }
 
