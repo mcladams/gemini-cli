@@ -17,36 +17,36 @@ npm ERR!     /build/gemini-cli-921r5e/gemini-cli-0.20.2/debian/home/.npm/_logs/2
 make[1]: *** [debian/rules:17: execute_after_dh_auto_build] Error 1
 ---
  package.json              | 4 ++--
- packages/cli/package.json | 2 +-
- 2 files changed, 3 insertions(+), 3 deletions(-)
+ packages/cli/package.json | 3 ++-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/package.json b/package.json
-index 905558e..0dec0be 100644
+index 70ab259..2a9a233 100644
 --- a/package.json
 +++ b/package.json
 @@ -62,7 +62,7 @@
      "pre-commit": "node scripts/pre-commit.js"
    },
    "overrides": {
--    "ink": "npm:@jrichman/ink@6.4.6",
-+    "@jrichman/ink": "^6.4.6",
+-    "ink": "npm:@jrichman/ink@6.4.7",
++    "@jrichman/ink": "^6.4.7",
      "wrap-ansi": "9.0.2",
      "cliui": {
        "wrap-ansi": "7.0.0"
-@@ -119,7 +119,7 @@
+@@ -121,7 +121,7 @@
      "yargs": "^17.7.2"
    },
    "dependencies": {
--    "ink": "npm:@jrichman/ink@6.4.6",
-+    "@jrichman/ink": "^6.4.6",
+-    "ink": "npm:@jrichman/ink@6.4.7",
++    "@jrichman/ink": "^6.4.7",
      "latest-version": "^9.0.0",
      "simple-git": "^3.28.0"
    },
 diff --git a/packages/cli/package.json b/packages/cli/package.json
-index 7e560b8..0a24204 100644
+index a3e13a4..2645e11 100644
 --- a/packages/cli/package.json
 +++ b/packages/cli/package.json
-@@ -31,6 +31,7 @@
+@@ -33,6 +33,7 @@
      "@google/gemini-cli-core": "file:../core",
      "@google/genai": "1.30.0",
      "@iarna/toml": "^2.2.5",
@@ -54,11 +54,12 @@ index 7e560b8..0a24204 100644
      "@modelcontextprotocol/sdk": "^1.23.0",
      "@types/update-notifier": "^6.0.8",
      "ansi-regex": "^6.2.2",
-@@ -43,7 +44,6 @@
+@@ -45,7 +46,7 @@
      "fzf": "^0.5.2",
      "glob": "^12.0.0",
      "highlight.js": "^11.11.1",
--    "ink": "npm:@jrichman/ink@6.4.6",
+-    "ink": "npm:@jrichman/ink@6.4.7",
++    "@jrichman/ink": "^6.4.7",
      "ink-gradient": "^3.0.0",
      "ink-spinner": "^5.0.0",
      "latest-version": "^9.0.0",
