@@ -21,29 +21,29 @@ make[1]: *** [debian/rules:17: execute_after_dh_auto_build] Error 1
  2 files changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/package.json b/package.json
-index 70ab259..2a9a233 100644
+index 8339e72..4b2c7d0 100644
 --- a/package.json
 +++ b/package.json
-@@ -62,7 +62,7 @@
+@@ -64,7 +64,7 @@
      "pre-commit": "node scripts/pre-commit.js"
    },
    "overrides": {
--    "ink": "npm:@jrichman/ink@6.4.7",
-+    "@jrichman/ink": "^6.4.7",
+-    "ink": "npm:@jrichman/ink@6.4.8",
++    "@jrichman/ink": "^6.4.8",
      "wrap-ansi": "9.0.2",
      "cliui": {
        "wrap-ansi": "7.0.0"
-@@ -121,7 +121,7 @@
+@@ -124,7 +124,7 @@
      "yargs": "^17.7.2"
    },
    "dependencies": {
--    "ink": "npm:@jrichman/ink@6.4.7",
-+    "@jrichman/ink": "^6.4.7",
+-    "ink": "npm:@jrichman/ink@6.4.8",
++    "@jrichman/ink": "^6.4.8",
      "latest-version": "^9.0.0",
      "simple-git": "^3.28.0"
    },
 diff --git a/packages/cli/package.json b/packages/cli/package.json
-index a3e13a4..2645e11 100644
+index c67a5d4..26eea7e 100644
 --- a/packages/cli/package.json
 +++ b/packages/cli/package.json
 @@ -33,6 +33,7 @@
@@ -54,12 +54,12 @@ index a3e13a4..2645e11 100644
      "@modelcontextprotocol/sdk": "^1.23.0",
      "@types/update-notifier": "^6.0.8",
      "ansi-regex": "^6.2.2",
-@@ -45,7 +46,7 @@
+@@ -46,7 +47,7 @@
      "fzf": "^0.5.2",
      "glob": "^12.0.0",
      "highlight.js": "^11.11.1",
--    "ink": "npm:@jrichman/ink@6.4.7",
-+    "@jrichman/ink": "^6.4.7",
+-    "ink": "npm:@jrichman/ink@6.4.8",
++    "@jrichman/ink": "^6.4.8",
      "ink-gradient": "^3.0.0",
      "ink-spinner": "^5.0.0",
      "latest-version": "^9.0.0",
