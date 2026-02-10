@@ -43,14 +43,12 @@ export class TerminalCapabilityManager {
   // eslint-disable-next-line no-control-regex
   private static readonly MODIFY_OTHER_KEYS_REGEX = /\x1b\[>4;(\d+)m/;
 
+  private detectionComplete = false;
   private terminalBackgroundColor: TerminalBackgroundColor;
   private kittySupported = false;
   private kittyEnabled = false;
-  private detectionComplete = false;
-  private terminalName: string | undefined;
   private modifyOtherKeysSupported = false;
-  private modifyOtherKeysEnabled = false;
-  private bracketedPasteEnabled = false;
+  private terminalName: string | undefined;
 
   private constructor() {}
 
@@ -217,11 +215,9 @@ export class TerminalCapabilityManager {
         this.kittyEnabled = true;
       } else if (this.modifyOtherKeysSupported) {
         enableModifyOtherKeys();
-        this.modifyOtherKeysEnabled = true;
       }
       // Always enable bracketed paste since it'll be ignored if unsupported.
       enableBracketedPasteMode();
-      this.bracketedPasteEnabled = true;
     } catch (e) {
       debugLogger.warn('Failed to enable keyboard protocols:', e);
     }
@@ -237,14 +233,6 @@ export class TerminalCapabilityManager {
 
   isKittyProtocolEnabled(): boolean {
     return this.kittyEnabled;
-  }
-
-  isBracketedPasteEnabled(): boolean {
-    return this.bracketedPasteEnabled;
-  }
-
-  isModifyOtherKeysEnabled(): boolean {
-    return this.modifyOtherKeysEnabled;
   }
 
   private parseColor(rHex: string, gHex: string, bHex: string): string {
