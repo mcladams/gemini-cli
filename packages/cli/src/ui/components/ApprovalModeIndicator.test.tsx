@@ -10,15 +10,15 @@ import { describe, it, expect } from 'vitest';
 import { ApprovalMode } from '@google/gemini-cli-core';
 
 describe('ApprovalModeIndicator', () => {
-  it('renders correctly for AUTO_EDIT mode', () => {
-    const { lastFrame } = render(
+  it('renders correctly for AUTO_EDIT mode', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator approvalMode={ApprovalMode.AUTO_EDIT} />,
     );
     expect(lastFrame()).toMatchSnapshot();
   });
 
-  it('renders correctly for AUTO_EDIT mode with plan enabled', () => {
-    const { lastFrame } = render(
+  it('renders correctly for AUTO_EDIT mode with plan enabled', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator
         approvalMode={ApprovalMode.AUTO_EDIT}
         allowPlanMode={true}
@@ -27,29 +27,29 @@ describe('ApprovalModeIndicator', () => {
     expect(lastFrame()).toMatchSnapshot();
   });
 
-  it('renders correctly for PLAN mode', () => {
-    const { lastFrame } = render(
+  it('renders correctly for PLAN mode', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator approvalMode={ApprovalMode.PLAN} />,
     );
     expect(lastFrame()).toMatchSnapshot();
   });
 
-  it('renders correctly for YOLO mode', () => {
-    const { lastFrame } = render(
+  it('renders correctly for YOLO mode', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator approvalMode={ApprovalMode.YOLO} />,
     );
     expect(lastFrame()).toMatchSnapshot();
   });
 
-  it('renders correctly for DEFAULT mode', () => {
-    const { lastFrame } = render(
+  it('renders correctly for DEFAULT mode', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator approvalMode={ApprovalMode.DEFAULT} />,
     );
     expect(lastFrame()).toMatchSnapshot();
   });
 
-  it('renders correctly for DEFAULT mode with plan enabled', () => {
-    const { lastFrame } = render(
+  it('renders correctly for DEFAULT mode with plan enabled', async () => {
+    const { lastFrame } = await render(
       <ApprovalModeIndicator
         approvalMode={ApprovalMode.DEFAULT}
         allowPlanMode={true}
