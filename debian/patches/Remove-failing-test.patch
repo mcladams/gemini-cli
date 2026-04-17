@@ -7,10 +7,10 @@ Subject: Remove failing test
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/packages/cli/src/ui/components/SettingsDialog.test.tsx b/packages/cli/src/ui/components/SettingsDialog.test.tsx
-index 4c42494..f239207 100644
+index 9887415..07bdff6 100644
 --- a/packages/cli/src/ui/components/SettingsDialog.test.tsx
 +++ b/packages/cli/src/ui/components/SettingsDialog.test.tsx
-@@ -486,7 +486,7 @@ describe('SettingsDialog', () => {
+@@ -568,7 +568,7 @@ describe('SettingsDialog', () => {
        unmount();
      });
  
@@ -19,7 +19,7 @@ index 4c42494..f239207 100644
        const settings = createMockSettings();
        const onSelect = vi.fn();
  
-@@ -505,7 +505,7 @@ describe('SettingsDialog', () => {
+@@ -587,7 +587,7 @@ describe('SettingsDialog', () => {
        // is complex due to keypress handling, so we focus on state validation
  
        unmount();
