@@ -1,2 +1,3 @@
 Remove-failing-test.patch
 Fix-build.patch
+Remove-duplicated-dep-jrichman.patch
