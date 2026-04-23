@@ -1,2 +1,3 @@
 bundle/gemini.js usr/lib/gemini-cli
+bundle/chunk*.js usr/lib/gemini-cli
 debian/helper-script/* usr/bin
