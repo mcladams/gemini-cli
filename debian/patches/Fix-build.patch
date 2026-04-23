@@ -16,15 +16,15 @@ npm ERR! A complete log of this run can be found in:
 npm ERR!     /build/gemini-cli-921r5e/gemini-cli-0.20.2/debian/home/.npm/_logs/2025-12-16T15_20_06_711Z-debug-0.log
 make[1]: *** [debian/rules:17: execute_after_dh_auto_build] Error 1
 ---
- package.json              | 5 ++---
+ package.json              | 7 ++-----
  packages/cli/package.json | 3 ++-
- 2 files changed, 4 insertions(+), 4 deletions(-)
+ 2 files changed, 4 insertions(+), 6 deletions(-)
 
 diff --git a/package.json b/package.json
-index 683b840..4feceeb 100644
+index 683b840..1d52844 100644
 --- a/package.json
 +++ b/package.json
-@@ -69,8 +69,7 @@
+@@ -69,14 +69,11 @@
      "pre-commit": "node scripts/pre-commit.js"
    },
    "overrides": {
@@ -34,7 +34,13 @@ index 683b840..4feceeb 100644
      "cliui": {
        "wrap-ansi": "7.0.0"
      },
-@@ -137,7 +136,7 @@
+     "glob": "^12.0.0",
+-    "node-domexception": "npm:empty@^0.10.1",
+-    "prebuild-install": "npm:nop@1.0.0",
+     "cross-spawn": "^7.0.6",
+     "minimatch": "^10.2.2"
+   },
+@@ -137,7 +134,7 @@
      "yargs": "^17.7.2"
    },
    "dependencies": {
