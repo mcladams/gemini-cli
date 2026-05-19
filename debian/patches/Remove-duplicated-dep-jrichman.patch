@@ -7,7 +7,7 @@ Subject: Remove duplicated dep jrichman
  1 file changed, 1 deletion(-)
 
 diff --git a/packages/cli/package.json b/packages/cli/package.json
-index ceec3c6..95d0f18 100644
+index 50ae962..4693403 100644
 --- a/packages/cli/package.json
 +++ b/packages/cli/package.json
 @@ -34,7 +34,6 @@

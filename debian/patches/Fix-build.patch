@@ -16,15 +16,15 @@ npm ERR! A complete log of this run can be found in:
 npm ERR!     /build/gemini-cli-921r5e/gemini-cli-0.20.2/debian/home/.npm/_logs/2025-12-16T15_20_06_711Z-debug-0.log
 make[1]: *** [debian/rules:17: execute_after_dh_auto_build] Error 1
 ---
- package.json              | 7 ++-----
+ package.json              | 5 ++---
  packages/cli/package.json | 3 ++-
- 2 files changed, 4 insertions(+), 6 deletions(-)
+ 2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/package.json b/package.json
-index 5ad9abe..5c82fe8 100644
+index ef558b2..5fc4259 100644
 --- a/package.json
 +++ b/package.json
-@@ -73,14 +73,11 @@
+@@ -73,8 +73,7 @@
      "pre-commit": "node scripts/pre-commit.js"
    },
    "overrides": {
@@ -34,13 +34,7 @@ index 5ad9abe..5c82fe8 100644
      "cliui": {
        "wrap-ansi": "7.0.0"
      },
-     "glob": "^12.0.0",
--    "node-domexception": "npm:empty@^0.10.1",
--    "prebuild-install": "npm:nop@1.0.0",
-     "cross-spawn": "^7.0.6",
-     "minimatch": "^10.2.2"
-   },
-@@ -144,7 +141,7 @@
+@@ -143,7 +142,7 @@
      "yargs": "^17.7.2"
    },
    "dependencies": {
@@ -50,7 +44,7 @@ index 5ad9abe..5c82fe8 100644
      "node-fetch-native": "^1.6.7",
      "proper-lockfile": "^4.1.2",
 diff --git a/packages/cli/package.json b/packages/cli/package.json
-index 502913f..ceec3c6 100644
+index f28ce4f..50ae962 100644
 --- a/packages/cli/package.json
 +++ b/packages/cli/package.json
 @@ -34,6 +34,7 @@
