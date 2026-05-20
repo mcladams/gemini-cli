@@ -1,3 +1,13 @@
+gemini-cli (0.42.0-0kali1) kali-dev; urgency=medium
+
+  * New upstream version 0.42.0
+  * Update debian/gemini-cli.install
+  * Refresh patches
+  * Do not run tests during the build
+  * Update installation
+
+ -- Sophie Brun <sophie@kali.org>  Wed, 20 May 2026 11:35:28 +0200
+
 gemini-cli (0.22.5-0kali1) kali-dev; urgency=medium
 
   * New upstream version 0.22.5
