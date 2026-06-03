@@ -1,0 +1,53 @@
+codecov:
+  notify:
+    wait_for_ci: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+      pester:
+        target: auto
+        threshold: 1%
+        flags:
+          - pester
+      pytest:
+        target: auto
+        threshold: 1%
+        flags:
+          - pytest
+    patch:
+      default:
+        target: 80%
+        informational: true
+      pester:
+        target: 80%
+        informational: true
+        flags:
+          - pester
+      pytest:
+        target: 80%
+        informational: true
+        flags:
+          - pytest
+
+ignore:
+  - "scripts/tests/**"
+  - "logs/**"
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+
+flags:
+  pester:
+    paths:
+      - "scripts/**"
+      - ".github/skills/**/scripts/**"
+    carryforward: true
+  pytest:
+    paths:
+      - ".github/skills/**/scripts/**"
+    carryforward: true

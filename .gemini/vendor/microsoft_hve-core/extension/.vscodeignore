@@ -1,0 +1,29 @@
+# Exclude everything by default
+**
+
+# Include only the extension essentials
+!.github/prompts/**
+!.github/instructions/**
+!.github/agents/**
+!.github/skills/**
+!docs/templates/**
+!scripts/lib/Modules/CIHelpers.psm1
+!scripts/security/**
+!icon.png
+!package.json
+!README.md
+!LICENSE
+!CHANGELOG.md
+
+# Exclude Python/dev artifacts from skills
+**/.venv/**
+**/.ruff_cache/**
+**/.pytest_cache/**
+**/__pycache__/**
+**/*.pyc
+
+# Exclude collection-specific READMEs (only the canonical README.md ships)
+README.*.md
+
+# Exclude collection-specific package templates (only the canonical package.json ships)
+package.*.json

@@ -1,0 +1,992 @@
+#!/usr/bin/env pwsh
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: MIT
+#Requires -Version 7.0
+
+<#
+.SYNOPSIS
+    Monitors SHA-pinned dependencies for staleness and security vulnerabilities.
+
+.DESCRIPTION
+    This script scans all SHA-pinned dependencies across GitHub Actions workflows
+    to identify stale or potentially vulnerable dependencies. It outputs results in structured formats
+    that can be consumed by CI/CD systems to generate build warnings.
+
+    Key features:
+    - Detects outdated GitHub Actions SHAs
+    - Outputs results for CI/CD integration
+    - Supports multiple output formats (JSON, Azure DevOps, GitHub Actions)
+
+.PARAMETER OutputFormat
+    Output format: 'json', 'azdo', 'github', or 'console' (default: console)
+
+.PARAMETER MaxAge
+    Maximum age in days before considering a dependency stale (default: 30)
+
+.PARAMETER LogPath
+    Path for security logging (default: ./logs/sha-staleness-monitoring.log)
+
+.PARAMETER OutputPath
+    Path to write structured output file (default: ./logs/stale-dependencies.json)
+
+.EXAMPLE
+    ./Test-SHAStaleness.ps1 -OutputFormat github
+    Check for stale SHAs and output GitHub Actions warnings
+
+.EXAMPLE
+    ./Test-SHAStaleness.ps1 -OutputFormat azdo -MaxAge 14
+    Check for stale SHAs and output Azure DevOps warnings for dependencies older than 14 days
+
+.EXAMPLE
+    ./Test-SHAStaleness.ps1 -OutputFormat json -OutputPath ./security-report.json
+    Generate JSON report of all stale dependencies
+
+.EXAMPLE
+    ./Test-SHAStaleness.ps1 -FailOnStale
+    Fail the build if stale dependencies are found
+
+.EXAMPLE
+    ./Test-SHAStaleness.ps1 -GraphQLBatchSize 10
+    Use smaller GraphQL batch size for rate-limited environments
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("json", "azdo", "github", "console", "BuildWarning", "Summary")]
+    [string]$OutputFormat = "console",
+
+    [Parameter(Mandatory = $false)]
+    [int]$MaxAge = 30,
+
+    [Parameter(Mandatory = $false)]
+    [string]$LogPath = "./logs/sha-staleness-monitoring.log",
+
+    [Parameter(Mandatory = $false)]
+    [string]$OutputPath = "./logs/sha-staleness-results.json",
+
+    [Parameter(Mandatory = $false)]
+    [switch]$FailOnStale,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 50)]
+    [int]$GraphQLBatchSize = 20
+)
+
+$ErrorActionPreference = 'Stop'
+
+# Import CIHelpers for workflow command escaping
+Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Modules/SecurityHelpers.psm1') -Force
+
+# Route Write-SecurityLog output through script-scoped format and log path
+$PSDefaultParameterValues['Write-SecurityLog:OutputFormat'] = $OutputFormat
+$PSDefaultParameterValues['Write-SecurityLog:LogPath'] = $LogPath
+
+# Script-scope collection of stale dependencies (used by multiple functions)
+$script:StaleDependencies = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+function Get-BulkGitHubActionsStaleness {
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$ActionRepos,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$ShaToActionMap,
+
+        [int]$BatchSize = 20
+    )
+
+    # Setup headers with authentication
+    $headers = @{
+        "Content-Type" = "application/json"
+    }
+
+    # Check multiple potential sources for GitHub token
+    $githubToken = $null
+    if ($env:GITHUB_TOKEN) {
+        $githubToken = $env:GITHUB_TOKEN
+    }
+    elseif ($env:SYSTEM_ACCESSTOKEN -and $env:BUILD_REPOSITORY_PROVIDER -eq "GitHub") {
+        $githubToken = $env:SYSTEM_ACCESSTOKEN
+    }
+    elseif ($env:GH_TOKEN) {
+        $githubToken = $env:GH_TOKEN
+    }
+
+    # Validate token if provided
+    $tokenStatus = Test-GitHubToken -Token $githubToken
+    if ($tokenStatus.Valid) {
+        $headers['Authorization'] = "Bearer $githubToken"
+    }
+    elseif ($githubToken) {
+        Write-SecurityLog "Token validation failed, proceeding without authentication" -Level Warning
+    }
+
+    $apiBase = Get-GitHubApiBase
+
+    # Build GraphQL query for multiple repositories (batch 1: get default branches)
+    $repoQueries = @()
+    $aliasMap = @{}
+
+    foreach ($i in 0..($ActionRepos.Count - 1)) {
+        $repo = $ActionRepos[$i]
+        $alias = "repo$i"
+        $aliasMap[$alias] = $repo
+
+        # Parse owner/repo (handle actions with subpaths like github/codeql-action/upload-sarif)
+        $parts = $repo.Split('/')
+        if ($parts.Count -lt 2) { continue }
+        $owner = $parts[0]
+        $repoName = $parts[1]
+
+        $repoQueries += @"
+        $alias`: repository(owner: "$owner", name: "$repoName") {
+            name
+            defaultBranchRef {
+                target {
+                    ... on Commit {
+                        oid
+                        committedDate
+                    }
+                }
+            }
+        }
+"@
+    }
+
+    # Single GraphQL query for all repository default branches
+    $graphqlQuery = @{
+        query = @"
+        query {
+            $($repoQueries -join "`n            ")
+            rateLimit {
+                limit
+                remaining
+                used
+                resetAt
+            }
+        }
+"@
+    } | ConvertTo-Json -Depth 10
+
+    try {
+        $repoResponse = Invoke-GitHubAPIWithRetry -Uri "$apiBase/graphql" -Method POST -Headers $headers -Body $graphqlQuery
+        if ($null -eq $repoResponse) { throw "GitHub GraphQL API returned no response" }
+
+        Write-SecurityLog "GraphQL Rate Limit: $($repoResponse.data.rateLimit.remaining)/$($repoResponse.data.rateLimit.limit) remaining" -Level Info
+
+        if ($repoResponse.errors) {
+            Write-SecurityLog "GraphQL errors: $($repoResponse.errors | ConvertTo-Json)" -Level Warning
+        }
+    }
+    catch {
+        $statusCode = $null
+        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+
+        if ($statusCode -in 403, 429) {
+            Write-SecurityLog "Repository GraphQL query hit rate limit ($statusCode). Falling back to REST checks." -Level Warning
+            Write-SecurityLog "SOLUTION: Provide a GitHub token via GITHUB_TOKEN environment variable for higher rate limits" -Level Warning
+        }
+        else {
+            Write-SecurityLog "Repository GraphQL query failed: $($_.Exception.Message)" -Level Error
+            Write-SecurityLog "CAUSE: Network connectivity issue or GitHub API unavailable" -Level Warning
+        }
+
+        throw
+    }
+
+    # Collect commit queries for all current SHAs
+    $commitQueries = @()
+    $commitAliasMap = @{}
+    $commitIndex = 0
+
+    foreach ($key in $ShaToActionMap.Keys) {
+        $action = $ShaToActionMap[$key]
+        $alias = "commit$commitIndex"
+        $commitAliasMap[$alias] = $key
+
+        # Parse owner/repo (handle actions with subpaths like github/codeql-action/upload-sarif)
+        $parts = $action.Repo.Split('/')
+        if ($parts.Count -lt 2) {
+            Write-SecurityLog "Invalid action repository format: $($action.Repo) - must be 'owner/repo'" -Level Warning
+            Write-SecurityLog "SOLUTION: Verify action reference in workflow file follows correct format" -Level Warning
+            continue
+        }
+        $owner = $parts[0]
+        $repoName = $parts[1]
+
+        $commitQueries += @"
+        $alias`: repository(owner: "$owner", name: "$repoName") {
+            object(oid: "$($action.SHA)") {
+                ... on Commit {
+                    oid
+                    committedDate
+                }
+            }
+        }
+"@
+        $commitIndex++
+    }
+
+    # Use configurable batch size from script parameter
+    $allCommitResults = @{}
+
+    for ($i = 0; $i -lt $commitQueries.Count; $i += $BatchSize) {
+        $endIndex = [Math]::Min($i + $BatchSize - 1, $commitQueries.Count - 1)
+        $batchQueries = $commitQueries[$i..$endIndex]
+
+        $commitGraphqlQuery = @{
+            query = @"
+            query {
+                $($batchQueries -join "`n                ")
+                rateLimit {
+                    remaining
+                    cost
+                }
+            }
+"@
+        } | ConvertTo-Json -Depth 10
+
+        try {
+            $commitResponse = Invoke-GitHubAPIWithRetry -Uri "$apiBase/graphql" -Method POST -Headers $headers -Body $commitGraphqlQuery
+            if ($null -eq $commitResponse) {
+                Write-SecurityLog "GitHub GraphQL API returned no response for commit batch query" -Level Warning
+                continue
+            }
+
+            # Merge results
+            foreach ($property in $commitResponse.data.PSObject.Properties) {
+                if ($property.Name -ne "rateLimit") {
+                    $allCommitResults[$property.Name] = $property.Value
+                }
+            }
+
+            Write-SecurityLog "GraphQL batch $([Math]::Floor($i / $BatchSize) + 1): Cost $($commitResponse.data.rateLimit.cost), $($commitResponse.data.rateLimit.remaining) remaining" -Level Info
+        }
+        catch {
+            Write-SecurityLog "Commit GraphQL batch query failed: $($_.Exception.Message)" -Level Warning
+            Write-SecurityLog "CAUSE: Network connectivity issue, rate limit exhausted, or malformed query" -Level Warning
+            Write-SecurityLog "SOLUTION: Check GitHub API status or reduce -GraphQLBatchSize parameter (current: $BatchSize)" -Level Warning
+        }
+    }
+
+    # Process results and return staleness information
+    $results = @()
+
+    foreach ($key in $ShaToActionMap.Keys) {
+        $action = $ShaToActionMap[$key]
+
+        # Find repository data
+        $repoAlias = $null
+        for ($i = 0; $i -lt $ActionRepos.Count; $i++) {
+            if ($ActionRepos[$i] -eq $action.Repo) {
+                $repoAlias = "repo$i"
+                break
+            }
+        }
+
+        if (-not $repoAlias -or -not $repoResponse.data.$repoAlias) {
+            Write-SecurityLog "No repository data found for $($action.Repo)" -Level Warning
+            continue
+        }
+
+        $repoData = $repoResponse.data.$repoAlias
+        if (-not $repoData.defaultBranchRef) {
+            Write-SecurityLog "No default branch found for $($action.Repo)" -Level Warning
+            continue
+        }
+
+        $latestSHA = $repoData.defaultBranchRef.target.oid
+        $latestDate = [DateTime]::Parse($repoData.defaultBranchRef.target.committedDate)
+
+        # Find current commit data
+        $commitAlias = $null
+        foreach ($alias in $commitAliasMap.Keys) {
+            if ($commitAliasMap[$alias] -eq $key) {
+                $commitAlias = $alias
+                break
+            }
+        }
+
+        if ($commitAlias -and $allCommitResults[$commitAlias] -and $allCommitResults[$commitAlias].object) {
+            $currentCommit = $allCommitResults[$commitAlias].object
+            $currentDate = [DateTime]::Parse($currentCommit.committedDate)
+            $daysOld = [Math]::Round((Get-Date).Subtract($currentDate).TotalDays)
+
+            $results += @{
+                ActionRepo  = $action.Repo
+                CurrentSHA  = $action.SHA
+                LatestSHA   = $latestSHA
+                CurrentDate = $currentDate
+                LatestDate  = $latestDate
+                DaysOld     = $daysOld
+                IsStale     = $action.SHA -ne $latestSHA -and $daysOld -gt $MaxAge
+                File        = $action.File
+            }
+        }
+        else {
+            Write-SecurityLog "No commit data found for $($action.Repo)@$($action.SHA)" -Level Warning
+        }
+    }
+
+    $totalCalls = 1 + [Math]::Ceiling($commitQueries.Count / $BatchSize)
+    $originalCalls = $ShaToActionMap.Count * 3
+    $reduction = [Math]::Round((1 - ($totalCalls / $originalCalls)) * 100, 1)
+
+    Write-SecurityLog "GraphQL optimization: Reduced from ~$originalCalls REST calls to $totalCalls GraphQL calls ($reduction% reduction)" -Level Success
+
+    return $results
+}
+
+function Test-GitHubActionsForStaleness {
+    Write-SecurityLog "Scanning GitHub Actions workflows for stale SHAs..." -Level Info
+
+    $WorkflowFiles = Get-ChildItem -Path ".github/workflows" -Filter "*.yml" -ErrorAction SilentlyContinue
+    $allActionRepos = @()
+    $shaToActionMap = @{}
+
+    # First pass: collect all unique repositories and SHAs
+    foreach ($File in $WorkflowFiles) {
+        $Content = Get-Content -Path $File.FullName -Raw
+        $SHAMatches = [regex]::Matches($Content, "uses:\s*([^@\s]+)@([a-fA-F0-9]{40})")
+
+        foreach ($Match in $SHAMatches) {
+            $ActionRepo = $Match.Groups[1].Value
+            $CurrentSHA = $Match.Groups[2].Value
+
+            if ($ActionRepo -notin $allActionRepos) {
+                $allActionRepos += $ActionRepo
+            }
+
+            $shaToActionMap["$ActionRepo@$CurrentSHA"] = @{
+                Repo = $ActionRepo
+                SHA  = $CurrentSHA
+                File = $File.FullName
+            }
+        }
+    }
+
+    if (@($allActionRepos).Count -eq 0) {
+        Write-SecurityLog "No SHA-pinned GitHub Actions found" -Level Info
+        return
+    }
+
+    Write-SecurityLog "Found $(@($allActionRepos).Count) unique repositories with $(@($shaToActionMap.Keys).Count) SHA-pinned actions" -Level Info
+
+    # Bulk query for all actions using GraphQL optimization
+    try {
+        $bulkResults = Get-BulkGitHubActionsStaleness -ActionRepos $allActionRepos -ShaToActionMap $shaToActionMap -BatchSize $GraphQLBatchSize
+
+        foreach ($result in $bulkResults) {
+            if ($result.IsStale) {
+                $script:StaleDependencies.Add([PSCustomObject]@{
+                    Type           = "GitHubAction"
+                    File           = $result.File
+                    Name           = $result.ActionRepo
+                    CurrentVersion = $result.CurrentSHA
+                    LatestVersion  = $result.LatestSHA
+                    DaysOld        = $result.DaysOld
+                    Severity       = if ($result.DaysOld -gt 90) { "High" } elseif ($result.DaysOld -gt 60) { "Medium" } else { "Low" }
+                    Message        = "GitHub Action is $($result.DaysOld) days old (current: $($result.CurrentSHA.Substring(0,8)), latest: $($result.LatestSHA.Substring(0,8)))"
+                })
+
+                Write-SecurityLog "Found stale GitHub Action: $($result.ActionRepo) ($($result.DaysOld) days old)" -Level Warning
+            }
+            else {
+                Write-SecurityLog "GitHub Action is up-to-date: $($result.ActionRepo)" -Level Info
+            }
+        }
+    }
+    catch {
+        Write-SecurityLog "Bulk GraphQL check failed, falling back to individual checks: $($_.Exception.Message)" -Level Warning
+
+        # Fallback to individual REST API calls via Invoke-GitHubAPIWithRetry
+        $defaultBranchCache = @{}
+        foreach ($key in $shaToActionMap.Keys) {
+            $action = $shaToActionMap[$key]
+
+            Write-SecurityLog "Checking GitHub Action (fallback): $($action.Repo)@$($action.SHA)" -Level Info
+
+            $headers = @{}
+            if ($env:GITHUB_TOKEN) {
+                $headers['Authorization'] = "token $env:GITHUB_TOKEN"
+            }
+
+            $apiBase = Get-GitHubApiBase
+            $repoSegments = $action.Repo.Split('/')
+            if ($repoSegments.Count -lt 2) {
+                Write-SecurityLog "Invalid GitHub Action repository format: $($action.Repo)" -Level Warning
+                continue
+            }
+
+            $owner = $repoSegments[0]
+            $repoName = $repoSegments[1]
+            $repoLookup = "$owner/$repoName"
+
+            if (-not $defaultBranchCache.ContainsKey($repoLookup)) {
+                $repoInfo = Invoke-GitHubAPIWithRetry -Uri "$apiBase/repos/$repoLookup" -Method GET -Headers $headers
+                if ($repoInfo) {
+                    $defaultBranchCache[$repoLookup] = if ($repoInfo.default_branch) { $repoInfo.default_branch } else { "main" }
+                }
+                else {
+                    Write-SecurityLog "Failed to discover default branch for $repoLookup, defaulting to 'main'" -Level Warning
+                    $defaultBranchCache[$repoLookup] = "main"
+                }
+            }
+
+            $branchName = $defaultBranchCache[$repoLookup]
+
+            $BranchInfo = Invoke-GitHubAPIWithRetry -Uri "$apiBase/repos/$repoLookup/branches/$branchName" -Method GET -Headers $headers
+            if (-not $BranchInfo) {
+                Write-SecurityLog "Failed to check GitHub Action $($action.Repo): could not fetch branch info" -Level Warning
+                continue
+            }
+            $LatestSHA = $BranchInfo.commit.sha
+
+            if ($action.SHA -ne $LatestSHA) {
+                $CurrentCommit = Invoke-GitHubAPIWithRetry -Uri "$apiBase/repos/$repoLookup/commits/$($action.SHA)" -Method GET -Headers $headers
+                if (-not $CurrentCommit) {
+                    Write-SecurityLog "Failed to check GitHub Action $($action.Repo): could not fetch commit info" -Level Warning
+                    continue
+                }
+                $CurrentDate = [DateTime]::Parse($CurrentCommit.commit.author.date)
+                $DaysOld = [Math]::Round((Get-Date).Subtract($CurrentDate).TotalDays)
+
+                if ($DaysOld -gt $MaxAge) {
+                    $script:StaleDependencies.Add([PSCustomObject]@{
+                        Type           = "GitHubAction"
+                        File           = $action.File
+                        Name           = $action.Repo
+                        CurrentVersion = $action.SHA
+                        LatestVersion  = $LatestSHA
+                        DaysOld        = $DaysOld
+                        Severity       = if ($DaysOld -gt 90) { "High" } elseif ($DaysOld -gt 60) { "Medium" } else { "Low" }
+                        Message        = "GitHub Action is $DaysOld days old (current: $($action.SHA.Substring(0,8)), latest: $($LatestSHA.Substring(0,8)))"
+                    })
+
+                    Write-SecurityLog "Found stale GitHub Action (fallback): $($action.Repo) ($DaysOld days old)" -Level Warning
+                }
+            }
+        }
+    }
+}
+
+function Write-SecurityOutput {
+    param(
+        [Parameter(Mandatory = $false)]
+        [array]$Dependencies = @(),
+
+        [Parameter(Mandatory)]
+        [ValidateSet("json", "azdo", "github", "console", "BuildWarning", "Summary")]
+        [string]$OutputFormat,
+
+        [Parameter()]
+        [string]$OutputPath
+    )
+
+    switch ($OutputFormat) {
+        "json" {
+            $JsonOutput = @{
+                Timestamp       = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+                MaxAgeThreshold = $MaxAge
+                TotalStaleItems = @($Dependencies).Count
+                Dependencies    = $Dependencies
+            } | ConvertTo-Json -Depth 10
+
+            try {
+                $OutputDir = Split-Path -Parent $OutputPath
+                if (!(Test-Path $OutputDir)) {
+                    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+                    Write-SecurityLog "Created output directory: $OutputDir" -Level Info
+                }
+
+                Set-Content -Path $OutputPath -Value $JsonOutput
+                Write-SecurityLog "JSON report written to: $OutputPath" -Level Success
+            }
+            catch {
+                Write-SecurityLog "Failed to write JSON output: $($_.Exception.Message)" -Level Error
+                Write-SecurityLog "CAUSE: Insufficient permissions or invalid path" -Level Warning
+                Write-SecurityLog "SOLUTION: Verify OutputPath is writable: $OutputPath" -Level Warning
+            }
+        }
+
+        "github" {
+            foreach ($Dep in $Dependencies) {
+                Write-CIAnnotation -Message "[$($Dep.Severity)] $($Dep.Message)" -Level Warning -File $Dep.File
+            }
+
+            if (@($Dependencies).Count -eq 0) {
+                Write-CIAnnotation -Message "No stale dependencies detected" -Level Notice
+            }
+            else {
+                Write-CIAnnotation -Message "Found $(@($Dependencies).Count) stale dependencies that may pose security risks" -Level Error
+            }
+
+            # Build step summary markdown table
+            $totalCount = @($Dependencies).Count
+
+            if ($totalCount -eq 0) {
+                $summaryContent = @"
+# SHA Staleness Analysis
+
+**All Clear:** No stale dependencies detected.
+
+**Found:** 0 | **Stale:** 0
+"@
+            }
+            else {
+                $tableRows = foreach ($Dep in $Dependencies) {
+                    $status = 'Stale'
+                    "| $($Dep.Name) | $($Dep.DaysOld) | $MaxAge | $status |"
+                }
+
+                $summaryContent = @"
+# SHA Staleness Analysis
+
+**Found:** $totalCount | **Stale:** $totalCount
+
+| Dependency | SHA Age (days) | Threshold (days) | Status |
+|------------|----------------|-------------------|--------|
+$($tableRows -join "`n")
+"@
+            }
+
+            Write-CIStepSummary -Content $summaryContent
+        }
+
+        "azdo" {
+            foreach ($Dep in $Dependencies) {
+                Write-CIAnnotation -Message "[$($Dep.Severity)] $($Dep.Message)" -Level Warning -File $Dep.File
+            }
+
+            if (@($Dependencies).Count -eq 0) {
+                Write-CIAnnotation -Message "No stale dependencies detected" -Level Notice
+            }
+            else {
+                Write-CIAnnotation -Message "Found $(@($Dependencies).Count) stale dependencies that may pose security risks" -Level Error
+                Set-CITaskResult -Result SucceededWithIssues
+            }
+        }
+
+        "console" {
+            if (@($Dependencies).Count -eq 0) {
+                Write-SecurityLog "No stale dependencies detected!" -Level Success
+            }
+            else {
+                Write-SecurityLog "=== STALE DEPENDENCIES DETECTED ===" -Level Warning
+                foreach ($Dep in $Dependencies) {
+                    Write-SecurityLog "[$($Dep.Severity)] $($Dep.Type): $($Dep.Name)" -Level Warning
+                    Write-SecurityLog "  File: $($Dep.File)" -Level Info
+                    Write-SecurityLog "  Message: $($Dep.Message)" -Level Info
+                    Write-Information "" -InformationAction Continue
+                }
+                Write-SecurityLog "Total stale dependencies: $(@($Dependencies).Count)" -Level Warning
+            }
+        }
+
+        "Summary" {
+            if (@($Dependencies).Count -eq 0) {
+                Write-Output "No stale dependencies detected!"
+            }
+            else {
+                Write-Output "=== SHA Staleness Summary ==="
+                Write-Output "Total stale dependencies: $(@($Dependencies).Count)"
+                $ByType = @($Dependencies | Group-Object Type)
+                foreach ($Group in $ByType) {
+                    Write-Output "$($Group.Name): $($Group.Count)"
+                }
+            }
+        }
+    }
+}
+
+function Compare-ToolVersion {
+    <#
+    .SYNOPSIS
+        Compares two version strings using semantic versioning rules.
+    .DESCRIPTION
+        Normalizes version strings by removing v-prefix and pre-release metadata,
+        then compares using System.Version when possible.
+    .OUTPUTS
+        Returns $true if Latest is newer than Current, $false otherwise.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Current,
+
+        [Parameter(Mandatory)]
+        [string]$Latest
+    )
+
+    # Normalize: strip v prefix, remove pre-release/build metadata
+    $normCurrent = $Current -replace '^v', '' -replace '[-+].*$', ''
+    $normLatest = $Latest -replace '^v', '' -replace '[-+].*$', ''
+
+    $currentVersion = $null
+    $latestVersion = $null
+
+    if ([System.Version]::TryParse($normCurrent, [ref]$currentVersion) -and
+        [System.Version]::TryParse($normLatest, [ref]$latestVersion)) {
+        return $latestVersion -gt $currentVersion
+    }
+
+    # Fallback: string comparison (not ideal but better than nothing)
+    Write-Verbose "Version parsing failed, falling back to string comparison"
+    return $normLatest -ne $normCurrent
+}
+
+function Get-ToolStaleness {
+    <#
+    .SYNOPSIS
+        Checks tool versions against their latest GitHub releases.
+
+    .DESCRIPTION
+        Reads the tool-checksums.json manifest and queries the GitHub Releases API
+        to detect when tracked tools have newer versions available.
+
+    .PARAMETER ManifestPath
+        Path to the tool-checksums.json manifest file.
+
+    .PARAMETER GitHubToken
+        GitHub API token for authenticated requests (higher rate limits).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string]$ManifestPath = (Join-Path $PSScriptRoot "tool-checksums.json"),
+
+        [Parameter()]
+        [string]$GitHubToken = $env:GITHUB_TOKEN
+    )
+
+    if (-not (Test-Path $ManifestPath)) {
+        Write-Warning "Tool manifest not found: $ManifestPath"
+        return @()
+    }
+
+    $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+    $results = @()
+
+    $headers = @{
+        'Accept'               = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    if ($GitHubToken) {
+        $headers['Authorization'] = "Bearer $GitHubToken"
+    }
+
+    $apiBase = Get-GitHubApiBase
+
+    foreach ($tool in $manifest.tools) {
+        $uri = "$apiBase/repos/$($tool.repo)/releases/latest"
+        $latestRelease = Invoke-GitHubAPIWithRetry -Uri $uri -Method GET -Headers $headers
+
+        if ($latestRelease) {
+            $latestVersion = $latestRelease.tag_name -replace '^v', ''
+
+            $isStale = Compare-ToolVersion -Current $tool.version -Latest $latestVersion
+
+            $results += [PSCustomObject]@{
+                Tool           = $tool.name
+                Repository     = $tool.repo
+                CurrentVersion = $tool.version
+                LatestVersion  = $latestVersion
+                IsStale        = $isStale
+                CurrentSHA256  = $tool.sha256
+                Notes          = $tool.notes
+                Error          = $null
+            }
+        }
+        else {
+            $errorMsg = "Failed to check $($tool.name): API returned no response"
+            Write-Warning $errorMsg
+
+            $results += [PSCustomObject]@{
+                Tool           = $tool.name
+                Repository     = $tool.repo
+                CurrentVersion = $tool.version
+                LatestVersion  = $null
+                IsStale        = $null
+                CurrentSHA256  = $tool.sha256
+                Notes          = $tool.notes
+                Error          = $errorMsg
+            }
+        }
+    }
+
+    return $results
+}
+
+function Get-PSModuleStaleness {
+    <#
+    .SYNOPSIS
+        Checks pinned PowerShell module versions against the PowerShell Gallery.
+
+    .DESCRIPTION
+        Reads the psModules array from tool-checksums.json and queries the
+        PowerShell Gallery OData API to detect when pinned modules have newer
+        versions available.
+
+    .PARAMETER ManifestPath
+        Path to the tool-checksums.json manifest file.
+
+    .EXAMPLE
+        $stale = Get-PSModuleStaleness
+        $stale | Where-Object { $_.IsStale } | ForEach-Object {
+            Write-Host "$($_.Module): $($_.CurrentVersion) -> $($_.LatestVersion)"
+        }
+
+    .NOTES
+        Requires network access to the PowerShell Gallery OData v2 API unless
+        HVE_PSGALLERY_REPOSITORY is set to a local mirror or test double.
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject[]])]
+    param(
+        [Parameter()]
+        [string]$ManifestPath = (Join-Path $PSScriptRoot "tool-checksums.json")
+    )
+
+    if (-not (Test-Path $ManifestPath)) {
+        Write-Warning "Tool manifest not found: $ManifestPath"
+        return @()
+    }
+
+    $manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+    if (-not $manifest.psModules) {
+        return @()
+    }
+
+    $apiBase = Get-PSGalleryApiBase
+    $results = @()
+
+    foreach ($mod in $manifest.psModules) {
+        if ([string]::IsNullOrWhiteSpace($mod.name) -or [string]::IsNullOrWhiteSpace($mod.version)) {
+            $missing = @()
+            if ([string]::IsNullOrWhiteSpace($mod.name)) { $missing += 'name' }
+            if ([string]::IsNullOrWhiteSpace($mod.version)) { $missing += 'version' }
+            $errorMsg = "psModules entry missing required field(s): $($missing -join ', ')"
+            Write-Warning $errorMsg
+            $results += [PSCustomObject]@{
+                Module         = if ($mod.name) { $mod.name } else { '<unnamed>' }
+                CurrentVersion = $mod.version
+                LatestVersion  = $null
+                IsStale        = $null
+                Notes          = $mod.notes
+                Error          = $errorMsg
+            }
+            continue
+        }
+
+        $escapedName = $mod.name -replace "'", "''"
+        $uri = "$apiBase/Packages()?`$filter=Id eq '$escapedName' and IsLatestVersion"
+        try {
+            $response = Invoke-RestMethod -Uri $uri -ErrorAction Stop
+            $latestVersion = $null
+            if ($response -and $response.properties -and $response.properties.Version) {
+                $latestVersion = [string]$response.properties.Version
+            }
+            # Fallback for Atom feed-style responses (not emitted by PSGallery v2
+            # single-package queries; retained in case a mirror returns feed XML).
+            elseif ($response -and $response.entry) {
+                $entry = if ($response.entry -is [array]) { $response.entry[0] } else { $response.entry }
+                if ($entry -and $entry.properties -and $entry.properties.Version) {
+                    $latestVersion = [string]$entry.properties.Version
+                }
+            }
+
+            if (-not $latestVersion) {
+                $results += [PSCustomObject]@{
+                    Module         = $mod.name
+                    CurrentVersion = $mod.version
+                    LatestVersion  = $null
+                    IsStale        = $null
+                    Notes          = $mod.notes
+                    Error          = "PSGallery returned no version for $($mod.name)"
+                }
+                continue
+            }
+
+            $isStale = Compare-ToolVersion -Current $mod.version -Latest $latestVersion
+            $results += [PSCustomObject]@{
+                Module         = $mod.name
+                CurrentVersion = $mod.version
+                LatestVersion  = $latestVersion
+                IsStale        = $isStale
+                Notes          = $mod.notes
+                Error          = $null
+            }
+        }
+        catch {
+            $errorMsg = "Failed to check $($mod.name): $($_.Exception.Message)"
+            Write-Warning $errorMsg
+            $results += [PSCustomObject]@{
+                Module         = $mod.name
+                CurrentVersion = $mod.version
+                LatestVersion  = $null
+                IsStale        = $null
+                Notes          = $mod.notes
+                Error          = $errorMsg
+            }
+        }
+    }
+
+    return $results
+}
+
+#region Main Execution
+
+function Invoke-SHAStalenessCheck {
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("json", "azdo", "github", "console", "BuildWarning", "Summary")]
+        [string]$OutputFormat = "console",
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxAge = 30,
+
+        [Parameter(Mandatory = $false)]
+        [string]$LogPath = "./logs/sha-staleness-monitoring.log",
+
+        [Parameter(Mandatory = $false)]
+        [string]$OutputPath = "./logs/sha-staleness-results.json",
+
+        [Parameter(Mandatory = $false)]
+        [switch]$FailOnStale,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 50)]
+        [int]$GraphQLBatchSize = 20
+    )
+
+    # Ensure logging directory exists (relocated from script scope)
+    $LogDir = Split-Path -Parent $LogPath
+    if (!(Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+
+    Write-SecurityLog "Starting SHA staleness monitoring..." -Level Info
+    Write-SecurityLog "Max age threshold: $MaxAge days" -Level Info
+    Write-SecurityLog "GraphQL batch size: $GraphQLBatchSize queries per request" -Level Info
+    Write-SecurityLog "Output format: $OutputFormat" -Level Info
+
+    # Reset stale dependencies for this run
+    $script:StaleDependencies = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    # Run staleness check for GitHub Actions
+    Test-GitHubActionsForStaleness
+
+    # Run staleness check for tools from tool-checksums.json
+    Write-SecurityLog "Checking tool staleness from tool-checksums.json" -Level Info
+
+    $toolResults = @(Get-ToolStaleness)
+    if (@($toolResults).Count -gt 0) {
+        $staleTools = @($toolResults | Where-Object { $_.IsStale -eq $true })
+        if (@($staleTools).Count -gt 0) {
+            Write-SecurityLog "Found $(@($staleTools).Count) stale tool(s):" -Level Warning
+            foreach ($tool in $staleTools) {
+                Write-SecurityLog "  - $($tool.Tool): $($tool.CurrentVersion) -> $($tool.LatestVersion)" -Level Warning
+
+                $script:StaleDependencies.Add([PSCustomObject]@{
+                    Type           = "Tool"
+                    File           = "scripts/security/tool-checksums.json"
+                    Name           = $tool.Tool
+                    CurrentVersion = $tool.CurrentVersion
+                    LatestVersion  = $tool.LatestVersion
+                    DaysOld        = $null
+                    Severity       = "Medium"
+                    Message        = "Tool has newer version available: $($tool.CurrentVersion) -> $($tool.LatestVersion)"
+                })
+            }
+        }
+        else {
+            Write-SecurityLog "All tools are up to date" -Level Info
+        }
+
+        $errorTools = @($toolResults | Where-Object { $null -ne $_.Error })
+        if (@($errorTools).Count -gt 0) {
+            Write-SecurityLog "Failed to check $(@($errorTools).Count) tool(s)" -Level Warning
+        }
+    }
+
+    # Run staleness check for PowerShell modules from tool-checksums.json (psModules)
+    Write-SecurityLog "Checking PowerShell module staleness from tool-checksums.json" -Level Info
+
+    $moduleResults = @(Get-PSModuleStaleness)
+    if (@($moduleResults).Count -gt 0) {
+        $staleModules = @($moduleResults | Where-Object { $_.IsStale -eq $true })
+        if (@($staleModules).Count -gt 0) {
+            Write-SecurityLog "Found $(@($staleModules).Count) stale PowerShell module(s):" -Level Warning
+            foreach ($mod in $staleModules) {
+                Write-SecurityLog "  - $($mod.Module): $($mod.CurrentVersion) -> $($mod.LatestVersion)" -Level Warning
+
+                $script:StaleDependencies.Add([PSCustomObject]@{
+                    Type           = "PowerShellModule"
+                    File           = "scripts/security/tool-checksums.json"
+                    Name           = $mod.Module
+                    CurrentVersion = $mod.CurrentVersion
+                    LatestVersion  = $mod.LatestVersion
+                    DaysOld        = $null
+                    Severity       = "Medium"
+                    Message        = "PowerShell module has newer version available: $($mod.CurrentVersion) -> $($mod.LatestVersion)"
+                })
+            }
+        }
+        else {
+            Write-SecurityLog "All PowerShell modules are up to date" -Level Info
+        }
+
+        $errorModules = @($moduleResults | Where-Object { $null -ne $_.Error -and $_.Error -notlike 'psModules entry missing*' })
+        if (@($errorModules).Count -gt 0) {
+            Write-SecurityLog "Failed to check $(@($errorModules).Count) PowerShell module(s)" -Level Warning
+        }
+
+        $malformedModules = @($moduleResults | Where-Object { $_.Error -like 'psModules entry missing*' })
+        foreach ($bad in $malformedModules) {
+            $script:StaleDependencies.Add([PSCustomObject]@{
+                Type           = "PowerShellModule"
+                File           = "scripts/security/tool-checksums.json"
+                Name           = $bad.Module
+                CurrentVersion = $bad.CurrentVersion
+                LatestVersion  = $null
+                DaysOld        = $null
+                Severity       = "High"
+                Message        = $bad.Error
+            })
+        }
+    }
+
+    Write-SecurityOutput -Dependencies $script:StaleDependencies -OutputFormat $OutputFormat -OutputPath $OutputPath
+
+    Write-SecurityLog "SHA staleness monitoring completed" -Level Success
+    Write-SecurityLog "Stale dependencies found: $(@($script:StaleDependencies).Count)" -Level Info
+
+    if (@($script:StaleDependencies).Count -gt 0 -and $FailOnStale) {
+        throw "Stale dependencies detected ($(@($script:StaleDependencies).Count) found)"
+    }
+
+    if (@($script:StaleDependencies).Count -gt 0) {
+        Write-SecurityLog "Stale dependencies found but not failing (use -FailOnStale to fail build)" -Level Warning
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        Invoke-SHAStalenessCheck -OutputFormat $OutputFormat -MaxAge $MaxAge -LogPath $LogPath -OutputPath $OutputPath -FailOnStale:$FailOnStale -GraphQLBatchSize $GraphQLBatchSize
+        exit 0
+    }
+    catch {
+        Write-Error -ErrorAction Continue "Test-SHAStaleness failed: $($_.Exception.Message)"
+        Write-CIAnnotation -Message $_.Exception.Message -Level Error
+        exit 1
+    }
+}
+
+#endregion Main Execution

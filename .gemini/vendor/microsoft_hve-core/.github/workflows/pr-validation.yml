@@ -1,0 +1,340 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# Minimal permissions for security
+permissions:
+  contents: read
+
+jobs:
+  spell-check:
+    name: Spell Check
+    uses: ./.github/workflows/spell-check.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  markdown-lint:
+    name: Markdown Lint
+    uses: ./.github/workflows/markdown-lint.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  table-format:
+    name: Table Format Check
+    uses: ./.github/workflows/table-format.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  psscriptanalyzer:
+    name: PowerShell Lint
+    uses: ./.github/workflows/ps-script-analyzer.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+      changed-files-only: true
+
+  discover-python-projects:
+    name: Discover Python Projects
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      directories: ${{ steps.find.outputs.directories }}
+      has-projects: ${{ steps.find.outputs.has-projects }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Find Python projects
+        id: find
+        shell: pwsh
+        run: |
+          $projectList = @(Get-ChildItem -Recurse -Force -Filter pyproject.toml |
+            Where-Object { $_.FullName -notmatch 'node_modules' } |
+            ForEach-Object { Resolve-Path -Relative $_.DirectoryName } |
+            ForEach-Object { $_ -replace '^\.[\\/]', '' } |
+            Sort-Object)
+          $jsonItems = $projectList | ForEach-Object { $_ | ConvertTo-Json -Compress }
+          $dirs = '[' + (($jsonItems) -join ',') + ']'
+          "directories=$dirs" >> $env:GITHUB_OUTPUT
+          if ($projectList.Count -eq 0) {
+            "has-projects=false" >> $env:GITHUB_OUTPUT
+            Write-Output 'No Python projects found'
+          } else {
+            "has-projects=true" >> $env:GITHUB_OUTPUT
+            Write-Output "Found Python projects: $dirs"
+          }
+
+  python-lint:
+    name: "Python Lint (${{ matrix.directory }})"
+    needs: discover-python-projects
+    if: needs.discover-python-projects.outputs.has-projects == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.discover-python-projects.outputs.directories) }}
+    uses: ./.github/workflows/python-lint.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+      changed-files-only: true
+      working-directory: ${{ matrix.directory }}
+
+  copyright-headers:
+    name: Copyright Headers
+    uses: ./.github/workflows/copyright-headers.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  yaml-lint:
+    name: YAML Lint
+    uses: ./.github/workflows/yaml-lint.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+      changed-files-only: true
+
+  pester-tests:
+    name: PowerShell Tests
+    uses: ./.github/workflows/pester-tests.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      soft-fail: false
+      changed-files-only: false
+      code-coverage: true
+
+  pytest:
+    name: "Python Tests (${{ matrix.directory }})"
+    needs: discover-python-projects
+    if: needs.discover-python-projects.outputs.has-projects == 'true'
+    uses: ./.github/workflows/pytest-tests.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      working-directory: ${{ matrix.directory }}
+      soft-fail: false
+      changed-files-only: true
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.discover-python-projects.outputs.directories) }}
+
+  fuzz-tests:
+    name: "Fuzz Tests (${{ matrix.directory }})"
+    needs: discover-python-projects
+    if: needs.discover-python-projects.outputs.has-projects == 'true'
+    uses: ./.github/workflows/fuzz-tests.yml
+    permissions:
+      contents: read
+    with:
+      working-directory: ${{ matrix.directory }}
+      soft-fail: false
+      changed-files-only: true
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.discover-python-projects.outputs.directories) }}
+
+  pip-audit:
+    name: "pip-audit (${{ matrix.directory }})"
+    needs: discover-python-projects
+    if: needs.discover-python-projects.outputs.has-projects == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJson(needs.discover-python-projects.outputs.directories) }}
+    uses: ./.github/workflows/pip-audit.yml
+    permissions:
+      contents: read
+    with:
+      working-directory: ${{ matrix.directory }}
+      soft-fail: false
+      changed-files-only: true
+
+  docusaurus-tests:
+    name: Docusaurus Tests
+    uses: ./.github/workflows/docusaurus-tests.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  frontmatter-validation:
+    name: Frontmatter Validation
+    uses: ./.github/workflows/frontmatter-validation.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+      changed-files-only: true
+      skip-footer-validation: false
+      warnings-as-errors: true
+
+  adr-consistency-validation:
+    name: ADR Consistency Validation
+    uses: ./.github/workflows/adr-consistency-validation.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      soft-fail: false
+      changed-files-only: true
+      upload-sarif: true
+      upload-artifact: false
+
+  ai-artifact-validation:
+    name: AI Artifact Validation
+    uses: ./.github/workflows/ai-artifact-validation.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  msdate-freshness:
+    name: ms.date Freshness Check
+    uses: ./.github/workflows/msdate-freshness-check.yml
+    permissions:
+      contents: read
+    with:
+      staleness-threshold-days: 90
+      changed-files-only: true
+      soft-fail: false
+
+  plugin-validation:
+    name: Plugin Validation
+    uses: ./.github/workflows/plugin-validation.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  skill-validation:
+    name: Skill Validation
+    uses: ./.github/workflows/skill-validation.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+      changed-files-only: true
+      base-branch: ${{ github.event.pull_request.base.sha || format('origin/{0}', github.base_ref) }}
+
+  link-lang-check:
+    name: Link Language Check
+    uses: ./.github/workflows/link-lang-check.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: false
+
+  markdown-link-check:
+    name: Markdown Link Check
+    uses: ./.github/workflows/markdown-link-check.yml
+    permissions:
+      contents: read
+    with:
+      soft-fail: true
+
+  dependency-pinning-check:
+    name: Validate Dependency Pinning
+    uses: ./.github/workflows/dependency-pinning-scan.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      soft-fail: false
+      upload-sarif: true
+      upload-artifact: false
+
+  workflow-permissions-check:
+    name: Workflow Permissions Check
+    uses: ./.github/workflows/workflow-permissions-scan.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      soft-fail: false
+      upload-sarif: true
+      upload-artifact: false
+
+  action-version-consistency-scan:
+    name: Action Version Consistency Scan
+    uses: ./.github/workflows/action-version-consistency-scan.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      soft-fail: false
+      upload-sarif: true
+      upload-artifact: false
+
+  gitleaks-scan:
+    name: Gitleaks Secret Scan
+    uses: ./.github/workflows/gitleaks-scan.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      soft-fail: false
+      upload-sarif: true
+      upload-artifact: false
+      log-opts: '${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}'
+
+  npm-audit:
+    name: npm Security Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Uses audit-ci with an allowlist for advisories that have no upstream
+      # fix available. See audit-ci.json for the current allowlist and rationale.
+      - name: Run security audit
+        run: npm run audit:npm
+
+  codeql:
+    name: CodeQL Security Analysis
+    uses: ./.github/workflows/codeql-analysis.yml
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+      actions: read
+
