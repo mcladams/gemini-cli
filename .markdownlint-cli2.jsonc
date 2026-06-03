@@ -1,0 +1,39 @@
+{
+  "ignores": [
+    "**/node_modules/**",
+    "**/packages/**",
+    ".copilot-tracking/**",
+    "logs/**",
+    "venv/**",
+    "scripts/tests/Fixtures/**",
+    "scripts/tests/linting/fixtures/**",
+    "extension/README.md",
+    "extension/README.*.md",
+    "extension/CHANGELOG.md",
+    "plugins/**/agents/**",
+    "plugins/**/instructions/**",
+    "plugins/**/commands/**",
+    "plugins/**/skills/**",
+    "plugins/**/docs/**",
+    "plugins/**/scripts/**",
+    ".github/instructions/**",
+    ".github/aw/logs/**",
+    ".github/agents/**",
+    ".github/prompts/**",
+    ".github/skills/**"
+  ],
+  "customRules": [
+    "markdownlint-rule-search-replace"
+  ],
+  "outputFormatters": [
+    [
+      "markdownlint-cli2-formatter-default"
+    ],
+    [
+      "markdownlint-cli2-formatter-json",
+      {
+        "name": "logs/markdownlint-results.json"
+      }
+    ]
+  ]
+}
