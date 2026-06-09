@@ -1,4 +1,4 @@
-# Requires -Version 7.5
+#requires -version 7.5
 
 <#
 .SYNOPSIS
@@ -32,6 +32,9 @@ Write-Host "🔍 Searching for open issues in '$Repository' that need triage (mi
 # Fetch open issues with number, title, and labels
 # Up to 1000 issues.
 $IssuesJson = gh issue list --repo "$Repository" --state open --limit 1000 --json number,title,labels | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to fetch issues list from GitHub." -ErrorAction Stop
+}
 
 if ($null -eq $IssuesJson) {
     Write-Host "✅ No issues found in '$Repository'."
@@ -61,6 +64,9 @@ foreach ($Issue in $TargetIssues) {
     
     # Trigger the workflow dispatch event
     gh workflow run "$Workflow" --repo "$Repository" -f "issue_number=$Number"
+    if ($LASTEXITCODE -ne 0) {
+         Write-Error "   ❌ Failed to trigger triage workflow for issue #$Number." -ErrorAction Continue
+    }
     
     # Sleep briefly to be nice to the API
     Start-Sleep -Seconds 1

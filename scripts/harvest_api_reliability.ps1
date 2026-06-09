@@ -1,4 +1,4 @@
-# Requires -Version 7.5
+#requires -version 7.5
 
 <#
 .SYNOPSIS
@@ -54,24 +54,20 @@ else {
 
 $Workflows = "Testing: E2E (Chained)", "Evals: Nightly"
 $DestDir = Join-Path $env:TEMP "gemini-reliability-$((New-Guid).Guid.Substring(0,8))"
-New-Item -ItemType Directory -Path $DestDir | Out-Null
+New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
 $MergedFile = "api-reliability-summary.jsonl"
-
-# Cleanup on exit
-# In PowerShell, we can't easily trap exit in the same way, but we'll try to clean up at the end.
 
 # Check Prerequisites
 try {
     gh --version | Out-Null
 }
 catch {
-    Write-Error "❌ Error: GitHub CLI (gh) is not installed."
-    exit 1
+    Write-Error "❌ Error: GitHub CLI (gh) is not installed." -ErrorAction Stop
 }
 
 # Clean start
-if (Test-Path $MergedFile) {
-    Remove-Item $MergedFile
+if (Test-Path -LiteralPath $MergedFile) {
+    Remove-Item -LiteralPath $MergedFile
 }
 
 $CreatedQuery = ">=$SinceDate"
@@ -85,21 +81,19 @@ foreach ($Workflow in $Workflows) {
         $GhArgs += @("--branch", $Branch)
     }
 
-    try {
-        $RunIds = gh $GhArgs
-    }
-    catch {
+    $RunIds = @(gh $GhArgs)
+    if ($LASTEXITCODE -ne 0) {
         Write-Warning "❌ Failed to fetch runs for '$Workflow'. Please check 'gh auth status' and permissions."
         continue
     }
 
-    if ($null -eq $RunIds -or $RunIds.Length -eq 0) {
+    if ($null -eq $RunIds -or $RunIds.Count -eq 0) {
         Write-Host "📭 No runs found for workflow '$Workflow' since $SinceDate."
         continue
     }
 
     foreach ($Id in $RunIds) {
-        if (-not $Id) { continue }
+        if ([string]::IsNullOrWhiteSpace($Id)) { continue }
         
         $RunDestDir = Join-Path $DestDir $Id
         # Download artifacts named 'eval-logs-*'
@@ -108,10 +102,10 @@ foreach ($Workflow in $Workflows) {
             gh run download "$Id" -p "eval-logs-*" -D "$RunDestDir" 2>$null | Out-Null
             
             # Find api-reliability.jsonl and append to master log
-            if (Test-Path $RunDestDir) {
-                $ReliabilityFiles = Get-ChildItem -Path $RunDestDir -Filter "api-reliability.jsonl" -Recurse
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $RunDestDir)) {
+                $ReliabilityFiles = Get-ChildItem -LiteralPath $RunDestDir -Filter "api-reliability.jsonl" -Recurse
                 foreach ($File in $ReliabilityFiles) {
-                    Get-Content $File.FullName | Add-Content $MergedFile
+                    Get-Content -LiteralPath $File.FullName | Add-Content -LiteralPath $MergedFile
                 }
             }
         }
@@ -121,8 +115,10 @@ foreach ($Workflow in $Workflows) {
     }
 }
 
-if (-not (Test-Path $MergedFile)) {
+if (-not (Test-Path -LiteralPath $MergedFile)) {
     Write-Host "📭 No reliability data found in the retrieved logs."
+    # Cleanup temp directory
+    Remove-Item -Path $DestDir -Recurse -Force -ErrorAction SilentlyContinue
     exit 0
 }
 
@@ -132,7 +128,7 @@ Write-Host "📊 Gemini API Reliability Summary (Since $SinceDate)"
 Write-Host "------------------------------------------------"
 
 # Process JSONL and summarize using PowerShell's native capabilities
-$Events = Get-Content $MergedFile | ForEach-Object { $_ | ConvertFrom-Json }
+$Events = Get-Content -LiteralPath $MergedFile | ForEach-Object { $_ | ConvertFrom-Json }
 
 $Summary = $Events | Group-Object model | ForEach-Object {
     $Group = $_.Group
@@ -147,7 +143,8 @@ $Summary = $Events | Group-Object model | ForEach-Object {
 
 $Summary | Format-Table
 
-Write-Host "`n💡 Total events captured: $($Events.Count)"
+$EventCount = if ($Events) { @($Events).Count } else { 0 }
+Write-Host "`n💡 Total events captured: $EventCount"
 
 # Cleanup
 Remove-Item -Path $DestDir -Recurse -Force -ErrorAction SilentlyContinue

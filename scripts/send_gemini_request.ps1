@@ -1,4 +1,4 @@
-# Requires -Version 7.5
+#requires -version 7.5
 
 <#
 .SYNOPSIS
@@ -46,7 +46,8 @@ $EnvFile = Join-Path $ProjectRoot ".env"
 if (Test-Path $EnvFile) {
     Write-Information "[INFO] Loading environment variables from .env file..."
     Get-Content $EnvFile | ForEach-Object {
-        if ($_ -match '^([^#=]+)=(.*)$') {
+        # Match Name=Value while ignoring inline comments
+        if ($_ -match '^([^#=]+)=([^#]*)(?:#.*)?$') {
             $Name = $Matches[1].Trim()
             $Value = $Matches[2].Trim().Trim('"').Trim("'")
             [System.Environment]::SetEnvironmentVariable($Name, $Value)
@@ -56,16 +57,15 @@ if (Test-Path $EnvFile) {
 
 # Validate API Key
 if (-not $env:GEMINI_API_KEY) {
-    Write-Error "GEMINI_API_KEY environment variable is not set."
-    exit 1
+    Write-Error "GEMINI_API_KEY environment variable is not set." -ErrorAction Stop
 }
 
 # Validate Payload File
-$PayloadPath = Resolve-Path $Payload -ErrorAction SilentlyContinue
-if (-not $PayloadPath) {
-    Write-Error "Payload file '$Payload' does not exist."
-    exit 1
+$PayloadItem = Get-Item -LiteralPath $Payload -ErrorAction SilentlyContinue
+if (-not $PayloadItem) {
+    Write-Error "Payload file '$Payload' does not exist." -ErrorAction Stop
 }
+$PayloadPath = $PayloadItem.FullName
 
 # API Endpoint definition
 $GenerateContentApi = if ($Stream) { "streamGenerateContent" } else { "generateContent" }
@@ -88,14 +88,13 @@ try {
     }
     else {
         # For non-streaming, use Invoke-RestMethod for easy JSON handling
-        $Body = Get-Content $PayloadPath -Raw
+        $Body = Get-Content -LiteralPath $PayloadPath -Raw
         $Response = Invoke-RestMethod -Uri $Uri -Method Post -Body $Body -ContentType "application/json"
         $Response | ConvertTo-Json -Depth 10
     }
 }
 catch {
-    Write-Error "Request failed: $_"
-    exit 1
+    Write-Error "Request failed: $_" -ErrorAction Stop
 }
 
 Write-Host "`n----------------------------------------"

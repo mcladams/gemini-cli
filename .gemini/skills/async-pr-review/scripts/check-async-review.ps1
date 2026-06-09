@@ -1,4 +1,4 @@
-# Requires -Version 7.5
+#requires -version 7.5
 
 <#
 .SYNOPSIS
@@ -23,13 +23,12 @@ $ErrorActionPreference = "Stop"
 
 $BaseDir = git rev-parse --show-toplevel 2>$null
 if (-not $BaseDir) {
-    Write-Error "❌ Must be run from within a git repository."
-    exit 1
+    Write-Error "❌ Must be run from within a git repository." -ErrorAction Stop
 }
 
 $LogDir = Join-Path $BaseDir (Join-Path ".gemini" (Join-Path "tmp" (Join-Path "async-reviews" (Join-Path "pr-$PRNumber" "logs"))))
 
-if (-not (Test-Path $LogDir)) {
+if (-not (Test-Path -LiteralPath $LogDir)) {
     Write-Host "STATUS: NOT_FOUND"
     Write-Host "❌ No logs found for PR #$PRNumber in $LogDir"
     exit 0
@@ -55,21 +54,21 @@ foreach ($Task in $Tasks) {
     $FilePath = Join-Path $LogDir $LogFile
     $ExitFile = Join-Path $LogDir "$Name.exit"
 
-    if (Test-Path $ExitFile) {
-        $ExitCode = Get-Content $ExitFile -Raw
-        $ExitCode = $ExitCode.Trim()
+    if (Test-Path -LiteralPath $ExitFile) {
+        $ExitCodeRaw = Get-Content -LiteralPath $ExitFile -Raw
+        $ExitCode = if ($ExitCodeRaw) { $ExitCodeRaw.Trim() } else { "1" }
         if ($ExitCode -eq "0") {
             Write-Host "✅ $Name: SUCCESS" -ForegroundColor Green
         }
         else {
             Write-Host "❌ $Name: FAILED (exit code $ExitCode)" -ForegroundColor Red
-            if (Test-Path $FilePath) {
+            if (Test-Path -LiteralPath $FilePath) {
                 Write-Host "   Last lines of $LogFile:"
-                Get-Content $FilePath -Tail 3 | ForEach-Object { Write-Host "      $_" }
+                Get-Content -LiteralPath $FilePath -Tail 3 | ForEach-Object { Write-Host "      $_" }
             }
         }
     }
-    elseif (Test-Path $FilePath) {
+    elseif (Test-Path -LiteralPath $FilePath) {
         Write-Host "⏳ $Name: RUNNING" -ForegroundColor Yellow
         $AllDone = $false
     }

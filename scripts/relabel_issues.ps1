@@ -1,4 +1,4 @@
-# Requires -Version 7.5
+#requires -version 7.5
 
 <#
 .SYNOPSIS
@@ -40,6 +40,9 @@ Write-Host "🔍 Searching for open issues in '$Repository' with label '$OldLabe
 
 # Fetch issues with the old label
 $IssuesJson = gh issue list --repo "$Repository" --label "$OldLabel" --state open --limit 1000 --json number,title | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to fetch issues list from GitHub." -ErrorAction Stop
+}
 
 if ($null -eq $IssuesJson) {
     Write-Host "✅ No issues found with label '$OldLabel'."
@@ -64,8 +67,12 @@ foreach ($Issue in $IssuesJson) {
     Write-Host "   + Adding:   $NewLabel"
     
     gh issue edit "$Number" --repo "$Repository" --add-label "$NewLabel" --remove-label "$OldLabel"
-    
-    Write-Host "   ✅ Done."
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "   ❌ Failed to relabel issue #$Number." -ErrorAction Continue
+    }
+    else {
+        Write-Host "   ✅ Done."
+    }
 }
 
 Write-Host "🎉 All issues relabeled!"
