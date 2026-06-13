@@ -1,0 +1,5 @@
+{
+  "name": "powershell-windows",
+  "description": "PowerShell Windows patterns. Critical pitfalls, operator syntax, error handling.",
+  "location": "SKILL.md"
+}
