@@ -18,6 +18,11 @@ The importer crawls source directories to identify:
 - **MCP Servers**: Configurations in `mcp_config.json`.
 - **Hooks**: Lifecycle handlers in `hooks.json`.
 
+### Advanced Ingestion Behaviors
+
+1. **Relative Pointer Resolution**: Automatically detects single-line relative pointer paths (e.g., pointing to external instruction subtrees) during the crawling and folder-copy phases. It resolves and inlines the referenced file's full markdown/JSON contents recursively, producing completely portable and self-contained packages.
+2. **Dynamic Frontmatter Generation**: Automatically converts unstructured or legacy instructions files (like Claude Code instructions, `CLAUDE.md`, `.claudecodedoc`, `.claudecoderc`, or `*.instructions.md`) into standard `SKILL.md` or rule files by dynamically synthesizing correct YAML frontmatter on the fly.
+
 ## Usage
 
 Invoke the importer via the slash command:
