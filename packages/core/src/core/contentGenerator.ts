@@ -121,6 +121,15 @@ const VERTEX_AI_REQUEST_TYPE_HEADER = 'X-Vertex-AI-LLM-Request-Type';
 const VERTEX_AI_SHARED_REQUEST_TYPE_HEADER =
   'X-Vertex-AI-LLM-Shared-Request-Type';
 
+/**
+ * Vertex AI Representative Endpoints (REP) for US and EU multi-regions.
+ * These are used as a workaround for the client dynamically
+ * constructing default legacy hostnames (e.g., 'us-aiplatform.googleapis.com')
+ * instead of routing to the official REP endpoints.
+ */
+const VERTEX_AI_US_REP_ENDPOINT = 'https://aiplatform.us.rep.googleapis.com';
+const VERTEX_AI_EU_REP_ENDPOINT = 'https://aiplatform.eu.rep.googleapis.com';
+
 function validateBaseUrl(baseUrl: string): void {
   try {
     new URL(baseUrl);
@@ -145,6 +154,13 @@ export async function createContentGeneratorConfig(
     vertexAiRouting,
   };
 
+  const getEnv = (key: string) => {
+    if (config?.env && config.env[key] !== undefined) {
+      return config.env[key];
+    }
+    return process.env[key];
+  };
+
   // If we are using Google auth or we are in Cloud Shell, there is nothing else to validate for now.
   // Return before touching the API-key keychain: on Linux without a Secret Service
   // (WSL/SSH/Docker/CI) keytar can block indefinitely on its functional probe.
@@ -156,16 +172,13 @@ export async function createContentGeneratorConfig(
   }
 
   const geminiApiKey =
-    apiKey ||
-    process.env['GEMINI_API_KEY'] ||
-    (await loadApiKey()) ||
-    undefined;
-  const googleApiKey = process.env['GOOGLE_API_KEY'] || undefined;
+    apiKey || getEnv('GEMINI_API_KEY') || (await loadApiKey()) || undefined;
+  const googleApiKey = getEnv('GOOGLE_API_KEY') || undefined;
   const googleCloudProject =
-    process.env['GOOGLE_CLOUD_PROJECT'] ||
-    process.env['GOOGLE_CLOUD_PROJECT_ID'] ||
+    getEnv('GOOGLE_CLOUD_PROJECT') ||
+    getEnv('GOOGLE_CLOUD_PROJECT_ID') ||
     undefined;
-  const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
+  const googleCloudLocation = getEnv('GOOGLE_CLOUD_LOCATION') || undefined;
 
   if (authType === AuthType.USE_GEMINI && geminiApiKey) {
     contentGeneratorConfig.apiKey = geminiApiKey;
@@ -185,8 +198,7 @@ export async function createContentGeneratorConfig(
   }
 
   if (authType === AuthType.GATEWAY) {
-    contentGeneratorConfig.apiKey =
-      apiKey || process.env['GEMINI_API_KEY'] || '';
+    contentGeneratorConfig.apiKey = apiKey || getEnv('GEMINI_API_KEY') || '';
     contentGeneratorConfig.vertexai = false;
 
     return contentGeneratorConfig;
@@ -341,6 +353,13 @@ export async function createContentGenerator(
         if (envBaseUrl) {
           validateBaseUrl(envBaseUrl);
           baseUrl = envBaseUrl;
+        } else if (config.authType === AuthType.USE_VERTEX_AI) {
+          const location = process.env['GOOGLE_CLOUD_LOCATION'];
+          if (location === 'us') {
+            baseUrl = VERTEX_AI_US_REP_ENDPOINT;
+          } else if (location === 'eu') {
+            baseUrl = VERTEX_AI_EU_REP_ENDPOINT;
+          }
         }
       } else {
         validateBaseUrl(baseUrl);

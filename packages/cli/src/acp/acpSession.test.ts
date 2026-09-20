@@ -319,6 +319,41 @@ describe('Session', () => {
     expect(result).toMatchObject({ stopReason: 'end_turn' });
   });
 
+  it.each([
+    { type: 'MAX_TOKENS_EXCEEDED', reason: 'MAX_TOKENS' },
+    { type: 'SAFETY_BLOCKED', reason: 'SAFETY' },
+    { type: 'RECITATION_BLOCKED', reason: 'RECITATION' },
+    { type: 'OTHER_BLOCKED', reason: 'OTHER' },
+    { type: 'THINKING_ONLY_RESPONSE', reason: 'STOP' },
+  ])(
+    'should gracefully handle InvalidStreamError with type $type in ACP session',
+    async ({ type, reason }) => {
+      const error = new InvalidStreamError(
+        `Stream failed with ${reason}`,
+        type as InvalidStreamError['type'],
+      );
+      mockSendMessageStream.mockImplementation(() => {
+        async function* errorGen(): AsyncGenerator<
+          ServerGeminiStreamEvent,
+          void,
+          unknown
+        > {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          yield* [] as any;
+          throw error;
+        }
+        return errorGen();
+      });
+
+      const result = await session.prompt({
+        sessionId: 'session-1',
+        prompt: [{ type: 'text', text: 'Hi' }],
+      });
+
+      expect(result).toMatchObject({ stopReason: 'end_turn' });
+    },
+  );
+
   it('should handle /memory command', async () => {
     const handleCommandSpy = vi
       .spyOn(
@@ -662,6 +697,76 @@ describe('Session', () => {
               content: { type: 'text', text: 'Test Explanation' },
             },
           ]),
+        }),
+      }),
+    );
+  });
+
+  it('should include both diff and explanation in request_permission content for edit tools', async () => {
+    mockTool.build.mockReturnValue({
+      getDescription: () => 'edit_file(file_path: test.ts)',
+      getDisplayTitle: () => 'edit_file(file_path: test.ts)',
+      getExplanation: () => 'Updating configuration value',
+      toolLocations: () => [],
+      shouldConfirmExecute: vi.fn().mockResolvedValue({
+        type: 'edit',
+        filePath: 'test.ts',
+        originalContent: 'old',
+        newContent: 'new',
+        onConfirm: vi.fn(),
+      }),
+      execute: vi.fn().mockResolvedValue({ llmContent: 'Tool Result' }),
+    });
+
+    mockConnection.requestPermission.mockResolvedValue({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'proceed_once',
+      },
+    });
+
+    const stream1 = createMockStream([
+      {
+        type: GeminiEventType.ToolCallRequest,
+        value: {
+          callId: 'call-edit-1',
+          name: 'test_tool',
+          args: {},
+          isClientInitiated: false,
+          prompt_id: 'prompt-1',
+        },
+      },
+    ]);
+    const stream2 = createMockStream([
+      {
+        type: GeminiEventType.Content,
+        value: '',
+      },
+    ]);
+
+    mockSendMessageStream
+      .mockReturnValueOnce(stream1)
+      .mockReturnValueOnce(stream2);
+
+    await session.prompt({
+      sessionId: 'session-1',
+      prompt: [{ type: 'text', text: 'Edit file' }],
+    });
+
+    expect(mockConnection.requestPermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCall: expect.objectContaining({
+          title: 'edit_file(file_path: test.ts)',
+          content: [
+            expect.objectContaining({
+              type: 'diff',
+              path: 'test.ts',
+            }),
+            {
+              type: 'content',
+              content: { type: 'text', text: 'Updating configuration value' },
+            },
+          ],
         }),
       }),
     );

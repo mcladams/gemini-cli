@@ -1,6 +1,6 @@
-# Latest stable release: v0.45.0
+# Latest stable release: v0.60.0
 
-Released: June 03, 2026
+Released: September 15, 2026
 
 For most users, our latest stable release is the recommended release. Install
 the latest stable version with:
@@ -11,55 +11,62 @@ npm install -g @google/gemini-cli
 
 ## Highlights
 
-- **Context Manager Simplification:** Completed a significant refactoring of the
-  context management system to improve reliability and architectural clarity.
-- **A2A Usage Metadata:** Enhanced the Agent-to-Agent protocol to expose usage
-  metadata, enabling more transparent resource monitoring.
-- **Terminal & PTY Robustness:** Resolved several critical issues related to
-  terminal interactions, including Termux relaunch loops and PTY resize errors.
-- **Routing Optimizations:** Updated default auto-routing and bypassed
-  classifiers for specific tool responses to prevent orphaned function errors.
-- **Tool Execution Control:** Forced the `update_topic` tool to execute
-  sequentially, ensuring consistent narrative flow in agent interactions.
+- **Extension Consent & Isolation:** Introduced explicit prompting for user
+  consent on environment changes requested by extensions, along with
+  sanitization of runtime-altering environment variables to ensure secure
+  execution environments.
+- **Sandbox & Directory Hardening:** Isolated the settings directory and
+  temporary directories within sandbox containers, including specific path
+  isolation enhancements for the macOS Seatbelt sandbox.
+- **Robust Boundary & Path Resolution:** Hardened workspace boundary validation,
+  symlink resolution, and NTFS 8.3 short name (SFN) path mitigation across
+  command safety and file discovery utilities.
+- **Enhanced API & Connection Security:** Implemented strict RFC 9207 issuer
+  identification in the Model Context Protocol (MCP) OAuth flow, along with
+  improved destination validation and connection routing inside web fetch
+  utilities.
 
 ## What's Changed
 
-- chore(release): bump version to 0.45.0-nightly.20260521.g854f811be by
-  @gemini-cli-robot in
-  [#27362](https://github.com/google-gemini/gemini-cli/pull/27362)
-- fix(cli): prevent Termux relaunch and resize remount loops by @saymanq in
-  [#27110](https://github.com/google-gemini/gemini-cli/pull/27110)
-- Feat/a2a expose usage metadata by @jvargassanchez-dot in
-  [#27288](https://github.com/google-gemini/gemini-cli/pull/27288)
-- feat(context): Complete simplification work. by @joshualitt in
-  [#27345](https://github.com/google-gemini/gemini-cli/pull/27345)
-- fix(core): force update_topic tool to execute sequentially by
+- fix(core): improve destination validation and connection routing in web fetch
+  utilities by @diegogodinezr in
+  [#29120](https://github.com/google-gemini/gemini-cli/pull/29120)
+- fix(core): enforce RFC 9207 issuer identification in MCP OAuth flow by
   @jvargassanchez-dot in
-  [#27357](https://github.com/google-gemini/gemini-cli/pull/27357)
-- Changelog for v0.44.0-preview.0 by @gemini-cli-robot in
-  [#27360](https://github.com/google-gemini/gemini-cli/pull/27360)
-- Changelog for v0.43.0 by @gemini-cli-robot in
-  [#27361](https://github.com/google-gemini/gemini-cli/pull/27361)
-- Revert "fix(core): prevent SIGHUP kills in PTY environments" by @bbiggs in
-  [#27401](https://github.com/google-gemini/gemini-cli/pull/27401)
-- fix(cli): filter internal session context from history during resumption by
-  @rmedranollamas in
-  [#27391](https://github.com/google-gemini/gemini-cli/pull/27391)
-- Update default auto routing by @DavidAPierce in
-  [#27071](https://github.com/google-gemini/gemini-cli/pull/27071)
-- fix(core): bypass routing classifiers to prevent orphaned function response
-  errors by @danielweis in
-  [#27389](https://github.com/google-gemini/gemini-cli/pull/27389)
-- fix(core): suppress PTY resize EBADF errors by @scidomino in
-  [#27461](https://github.com/google-gemini/gemini-cli/pull/27461)
-- fix(core): prevent blacklist bypass in mcp list by @ompatel-aiml in
-  [#27377](https://github.com/google-gemini/gemini-cli/pull/27377)
-- fix(cli): ignore unmapped vim normal keys by @MukundaKatta in
-  [#27102](https://github.com/google-gemini/gemini-cli/pull/27102)
-- fix(patch): cherry-pick bd53951 to release/v0.45.0-preview.0-pr-27496 to patch
-  version v0.45.0-preview.0 and create version 0.45.0-preview.1 by
+  [#29117](https://github.com/google-gemini/gemini-cli/pull/29117)
+- chore(release): bump version to 0.60.0-nightly.20260901.g0bd1d4397 by
   @gemini-cli-robot in
-  [#27535](https://github.com/google-gemini/gemini-cli/pull/27535)
+  [#29162](https://github.com/google-gemini/gemini-cli/pull/29162)
+- Changelog for v0.58.0 by @gemini-cli-robot in
+  [#29161](https://github.com/google-gemini/gemini-cli/pull/29161)
+- fix(cli): isolate temporary directory for macOS Seatbelt sandbox by
+  @jvargassanchez-dot in
+  [#29171](https://github.com/google-gemini/gemini-cli/pull/29171)
+- feat(extensions): harden path resolution and boundary validation in extension
+  loader by @diegogodinezr in
+  [#29169](https://github.com/google-gemini/gemini-cli/pull/29169)
+- Changelog for v0.59.0-preview.0 by @gemini-cli-robot in
+  [#29159](https://github.com/google-gemini/gemini-cli/pull/29159)
+- fix(core): sanitize and remove hardcoded Google CrUX API key in
+  chrome-devtools-mcp by @amelidev in
+  [#29158](https://github.com/google-gemini/gemini-cli/pull/29158)
+- fix(extensions): prompt for consent on environment changes and sanitize
+  runtime-altering environment variables by @amelidev in
+  [#28863](https://github.com/google-gemini/gemini-cli/pull/28863)
+- fix(core): enhance workspace path boundary checks and symlink resolution in
+  command safety and file discovery by @jesussamuel-byte in
+  [#29170](https://github.com/google-gemini/gemini-cli/pull/29170)
+- fix(config): enforce strict permission and ownership checks on system-wide
+  configuration paths by @jesussamuel-byte in
+  [#29115](https://github.com/google-gemini/gemini-cli/pull/29115)
+- fix(core): mitigate NTFS 8.3 short name (SFN) path by @urielefrenvirtusa in
+  [#29116](https://github.com/google-gemini/gemini-cli/pull/29116)
+- fix(cli): isolate settings directory in sandbox containers by
+  @jvargassanchez-dot in
+  [#29216](https://github.com/google-gemini/gemini-cli/pull/29216)
+- fix(core): enforce envelope metadata provenance for untrusted tool outputs by
+  @luisfelipe-alt in
+  [#29215](https://github.com/google-gemini/gemini-cli/pull/29215)
 
 **Full Changelog**:
-https://github.com/google-gemini/gemini-cli/compare/v0.44.1...v0.45.0
+https://github.com/google-gemini/gemini-cli/compare/v0.59.0...v0.60.0
