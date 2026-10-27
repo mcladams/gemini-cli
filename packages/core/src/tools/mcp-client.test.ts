@@ -3067,7 +3067,9 @@ describe('connectToMcpServer with OAuth', () => {
     expect(client).toBe(mockedClient);
     expect(mockedClient.connect).toHaveBeenCalledTimes(2);
     expect(mockAuthProvider.authenticate).toHaveBeenCalledOnce();
-    expect(OAuthUtils.discoverOAuthConfig).toHaveBeenCalledWith(serverUrl);
+    expect(OAuthUtils.discoverOAuthConfig).toHaveBeenCalledWith(serverUrl, {
+      allowPrivateNetwork: undefined,
+    });
 
     const authHeader = (unwrap(capturedTransport) as TestableTransport)
       ._requestInit?.headers?.['Authorization'];
@@ -3108,6 +3110,7 @@ describe('connectToMcpServer with OAuth', () => {
     expect(OAuthUtils.discoverOAuthFromWWWAuthenticate).toHaveBeenCalledWith(
       wwwAuthHeader,
       serverUrl,
+      { allowPrivateNetwork: undefined },
     );
     expect(OAuthUtils.discoverOAuthConfig).not.toHaveBeenCalled();
     expect(mockAuthProvider.authenticate).toHaveBeenCalledOnce();
@@ -3152,10 +3155,99 @@ describe('connectToMcpServer with OAuth', () => {
     expect(OAuthUtils.discoverOAuthFromWWWAuthenticate).toHaveBeenCalledWith(
       wwwAuthHeader,
       serverUrl,
+      { allowPrivateNetwork: undefined },
     );
     expect(OAuthUtils.extractBaseUrl).toHaveBeenCalledWith(serverUrl);
-    expect(OAuthUtils.discoverOAuthConfig).toHaveBeenCalledWith(baseUrl);
+    expect(OAuthUtils.discoverOAuthConfig).toHaveBeenCalledWith(baseUrl, {
+      allowPrivateNetwork: undefined,
+    });
     expect(mockAuthProvider.authenticate).toHaveBeenCalledOnce();
+  });
+
+  it('should respect explicit authorizationResponseIssParameterSupported over discovered metadata in both discovery paths', async () => {
+    const serverUrl = 'http://test-server.com/mcp';
+    const authUrl = 'http://auth.example.com/auth';
+    const tokenUrl = 'http://auth.example.com/token';
+    const wwwAuthHeader = `Bearer realm="test", resource_metadata="http://test-server.com/.well-known/oauth-protected-resource"`;
+
+    // Path 1: handleAutomaticOAuth (401 with www-authenticate header)
+    vi.mocked(mockedClient.connect)
+      .mockRejectedValueOnce(
+        new StreamableHTTPError(
+          401,
+          `Unauthorized\nwww-authenticate: ${wwwAuthHeader}`,
+        ),
+      )
+      .mockResolvedValueOnce(undefined);
+
+    vi.mocked(OAuthUtils.discoverOAuthFromWWWAuthenticate).mockResolvedValue({
+      authorizationUrl: authUrl,
+      issuer: 'http://auth.example.com',
+      tokenUrl,
+      scopes: ['read'],
+      authorizationResponseIssParameterSupported: true,
+    });
+
+    await connectToMcpServer(
+      '0.0.1',
+      'test-server',
+      {
+        httpUrl: serverUrl,
+        oauth: {
+          enabled: true,
+          authorizationResponseIssParameterSupported: false,
+        },
+      },
+      false,
+      workspaceContext,
+      MOCK_CONTEXT,
+    );
+
+    expect(mockAuthProvider.authenticate).toHaveBeenCalledWith(
+      'test-server',
+      expect.objectContaining({
+        authorizationResponseIssParameterSupported: false,
+      }),
+      serverUrl,
+    );
+
+    vi.mocked(mockAuthProvider.authenticate).mockClear();
+
+    // Path 2: connectToMcpServer base-URL discovery (401 without www-authenticate header)
+    vi.mocked(mockedClient.connect)
+      .mockRejectedValueOnce(new StreamableHTTPError(401, 'Unauthorized'))
+      .mockResolvedValueOnce(undefined);
+
+    vi.mocked(OAuthUtils.discoverOAuthConfig).mockResolvedValue({
+      authorizationUrl: authUrl,
+      issuer: 'http://auth.example.com',
+      tokenUrl,
+      scopes: ['read'],
+      authorizationResponseIssParameterSupported: true,
+    });
+
+    await connectToMcpServer(
+      '0.0.1',
+      'test-server',
+      {
+        httpUrl: serverUrl,
+        oauth: {
+          enabled: true,
+          authorizationResponseIssParameterSupported: false,
+        },
+      },
+      false,
+      workspaceContext,
+      MOCK_CONTEXT,
+    );
+
+    expect(mockAuthProvider.authenticate).toHaveBeenCalledWith(
+      'test-server',
+      expect.objectContaining({
+        authorizationResponseIssParameterSupported: false,
+      }),
+      serverUrl,
+    );
   });
 });
 

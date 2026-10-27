@@ -757,6 +757,19 @@ export class Session {
             content,
             locations: invocation.toolLocations(),
             kind: toAcpToolKind(tool.kind),
+            ...(confirmationDetails.type === 'mcp' && {
+              _meta: {
+                'gemini-cli': {
+                  mcp: {
+                    server_name:
+                      confirmationDetails.serverName?.trim() ||
+                      'generic_server',
+                    tool_name:
+                      confirmationDetails.toolName?.trim() || 'generic_tool',
+                  },
+                },
+              },
+            }),
           },
         };
 
@@ -1037,6 +1050,7 @@ export class Session {
       let currentPathSpec = pathName;
       let resolvedSuccessfully = false;
       let readDirectly = false;
+      let isDirectory = false;
 
       const result = await resolveAtCommandPath(
         pathName,
@@ -1227,18 +1241,10 @@ export class Session {
             const stats = resolved
               ? resolved.stats
               : await fs.stat(absolutePath);
-            if (stats.isDirectory()) {
-              currentPathSpec = pathName.endsWith('/')
-                ? `${pathName}**`
-                : `${pathName}/**`;
-              this.debug(
-                `Path ${pathName} resolved to directory, using glob: ${currentPathSpec}`,
-              );
-            } else {
-              this.debug(
-                `Path ${pathName} resolved to file: ${currentPathSpec}`,
-              );
-            }
+            isDirectory = stats.isDirectory();
+            this.debug(
+              `Path ${pathName} resolved to ${isDirectory ? 'directory' : 'file'}: ${currentPathSpec}`,
+            );
             resolvedSuccessfully = true;
           }
         } else {
@@ -1311,11 +1317,11 @@ export class Session {
         }
       }
       if (resolvedSuccessfully) {
-        if (!readDirectly) {
+        if (!readDirectly && !isDirectory) {
           pathSpecsToRead.push(currentPathSpec);
+          contentLabelsForDisplay.push(pathName);
         }
         atPathToResolvedSpecMap.set(pathName, currentPathSpec);
-        contentLabelsForDisplay.push(pathName);
       }
     }
 
@@ -1379,8 +1385,10 @@ export class Session {
       embeddedContext.length === 0 &&
       directContents.length === 0
     ) {
-      // Fallback for lone "@" or completely invalid @-commands resulting in empty initialQueryText
-      debugLogger.warn('No valid file paths found in @ commands to read.');
+      if (atPathToResolvedSpecMap.size === 0) {
+        // Fallback for lone "@" or completely invalid @-commands resulting in empty initialQueryText
+        debugLogger.warn('No valid file paths found in @ commands to read.');
+      }
       return [{ text: initialQueryText }];
     }
 

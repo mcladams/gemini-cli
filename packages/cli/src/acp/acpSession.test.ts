@@ -724,6 +724,118 @@ describe('Session', () => {
     );
   });
 
+  it('should resolve @directory resource_link without eagerly reading directory contents via ReadManyFilesTool', async () => {
+    const mockBuild = vi.fn();
+    (ReadManyFilesTool as unknown as Mock).mockImplementation(() => ({
+      name: 'read_many_files',
+      kind: 'read',
+      build: mockBuild,
+    }));
+
+    (path.resolve as unknown as Mock).mockReturnValue(
+      '/tmp/Documents/internal',
+    );
+    (fs.stat as unknown as Mock).mockResolvedValue({
+      isDirectory: () => true,
+      isFile: () => false,
+    });
+
+    const stream = createMockStream([
+      {
+        type: GeminiEventType.Content,
+        value: 'Listed files',
+      },
+    ]);
+    mockSendMessageStream.mockReturnValue(stream);
+
+    await session.prompt({
+      sessionId: 'session-1',
+      prompt: [
+        { type: 'text', text: 'List all files stored in ' },
+        {
+          type: 'resource_link',
+          uri: 'file://Documents/internal/',
+          mimeType: 'inode/directory',
+          name: 'Documents/internal/',
+        },
+      ],
+    });
+
+    expect(mockBuild).not.toHaveBeenCalled();
+    expect(mockSendMessageStream).toHaveBeenCalledWith(
+      [{ text: 'List all files stored in @Documents/internal/' }],
+      expect.any(AbortSignal),
+      expect.any(String),
+    );
+  });
+
+  it('should read @file resource_link while skipping ReadManyFilesTool for @directory resource_link in mixed prompts', async () => {
+    const mockBuild = vi.fn().mockReturnValue({
+      getDescription: () => 'Read files',
+      toolLocations: () => [],
+      execute: vi.fn().mockResolvedValue({
+        llmContent: ['--- file.txt ---\n\nFile content\n\n'],
+      }),
+    });
+    (ReadManyFilesTool as unknown as Mock).mockImplementation(() => ({
+      name: 'read_many_files',
+      kind: 'read',
+      build: mockBuild,
+    }));
+
+    (path.resolve as unknown as Mock).mockImplementation(
+      (_dir: string, p: string) => `/tmp/${p}`,
+    );
+    (fs.stat as unknown as Mock).mockImplementation((p: string) =>
+      Promise.resolve({
+        isDirectory: () => p.includes('Documents/internal'),
+        isFile: () => !p.includes('Documents/internal'),
+      }),
+    );
+
+    const stream = createMockStream([
+      {
+        type: GeminiEventType.Content,
+        value: 'Compared files',
+      },
+    ]);
+    mockSendMessageStream.mockReturnValue(stream);
+
+    await session.prompt({
+      sessionId: 'session-1',
+      prompt: [
+        { type: 'text', text: 'Compare ' },
+        {
+          type: 'resource_link',
+          uri: 'file://file.txt',
+          mimeType: 'text/plain',
+          name: 'file.txt',
+        },
+        { type: 'text', text: ' with ' },
+        {
+          type: 'resource_link',
+          uri: 'file://Documents/internal/',
+          mimeType: 'inode/directory',
+          name: 'Documents/internal/',
+        },
+      ],
+    });
+
+    expect(mockBuild).toHaveBeenCalledWith({
+      include: ['file.txt'],
+    });
+    expect(mockSendMessageStream).toHaveBeenCalledWith(
+      [
+        { text: 'Compare @file.txt with @Documents/internal/' },
+        { text: '\n--- Content from referenced files ---' },
+        { text: '\nContent from @file.txt:\n' },
+        { text: 'File content' },
+      ],
+      expect.any(AbortSignal),
+      expect.any(String),
+    );
+  });
+
   it('should handle rate limit error', async () => {
     const error = new Error('Rate limit');
     const customError = error as { status?: number; message?: string };
@@ -925,6 +1037,115 @@ describe('Session', () => {
         }),
       }),
     );
+  });
+
+  describe('MCP permission identity', () => {
+    async function requestToolPermission(
+      serverName?: string,
+    ): Promise<acp.RequestPermissionRequest> {
+      const tool = {
+        kind: 'other',
+        build: vi.fn().mockReturnValue({
+          getDescription: () => 'list_items',
+          toolLocations: () => [],
+          shouldConfirmExecute: vi.fn().mockResolvedValue(
+            serverName === undefined
+              ? {
+                  type: 'info',
+                  title: 'Confirm tool execution',
+                  prompt: 'Run tool?',
+                  onConfirm: vi.fn(),
+                }
+              : {
+                  type: 'mcp',
+                  title: 'Confirm MCP Tool Execution',
+                  serverName,
+                  toolName: 'list_items',
+                  toolDisplayName: 'list_items',
+                  toolArgs: {},
+                  onConfirm: vi.fn(),
+                },
+          ),
+          execute: vi.fn().mockResolvedValue({ llmContent: 'Tool Result' }),
+        }),
+      };
+      mockToolRegistry.getTool.mockReturnValue(tool);
+      mockConnection.requestPermission.mockResolvedValue({
+        outcome: { outcome: 'selected', optionId: 'proceed_once' },
+      });
+      mockSendMessageStream
+        .mockReturnValueOnce(
+          createMockStream([
+            {
+              type: GeminiEventType.ToolCallRequest,
+              value: {
+                callId: 'call-mcp-1',
+                name: 'mcp_server_list_items',
+                args: {},
+                isClientInitiated: false,
+                prompt_id: 'prompt-1',
+              },
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          createMockStream([{ type: GeminiEventType.Content, value: '' }]),
+        );
+
+      await session.prompt({
+        sessionId: 'session-1',
+        prompt: [{ type: 'text', text: 'Call tool' }],
+      });
+
+      expect(mockConnection.requestPermission).toHaveBeenCalledOnce();
+      return mockConnection.requestPermission.mock.calls[0][0];
+    }
+
+    it.each(['my-server', 'my server.name'])(
+      'includes raw MCP identity and descriptive option names for server %s',
+      async (serverName) => {
+        const request = await requestToolPermission(serverName);
+        expect(request.toolCall._meta).toEqual({
+          'gemini-cli': {
+            mcp: { server_name: serverName, tool_name: 'list_items' },
+          },
+        });
+        expect(request.options).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              optionId: 'proceed_always_server',
+              name: `Allow all "${serverName}" server tools for this session`,
+            }),
+            expect.objectContaining({
+              optionId: 'proceed_always_tool',
+              name: 'Allow tool "list_items" for this session',
+            }),
+          ]),
+        );
+      },
+    );
+
+    it('leaves non-MCP permission requests without tool metadata', async () => {
+      const request = await requestToolPermission();
+      expect(request.toolCall).not.toHaveProperty('_meta');
+    });
+
+    it('falls back to generic_server when serverName is whitespace-only', async () => {
+      const request = await requestToolPermission('   ');
+      expect(request.toolCall._meta).toEqual({
+        'gemini-cli': {
+          mcp: { server_name: 'generic_server', tool_name: 'list_items' },
+        },
+      });
+      expect(request.options).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            optionId: 'proceed_always_server',
+            name: 'Allow all "generic_server" server tools for this session',
+          }),
+        ]),
+      );
+    });
   });
 
   it('should include both diff and explanation in request_permission content for edit tools', async () => {

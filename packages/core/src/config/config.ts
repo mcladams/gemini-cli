@@ -39,6 +39,10 @@ import { GlobTool } from '../tools/glob.js';
 import { ActivateSkillTool } from '../tools/activate-skill.js';
 import { EditTool } from '../tools/edit.js';
 import { ShellTool } from '../tools/shell.js';
+import {
+  resetAcknowledgedUntrustedFlags,
+  resetModifiedBuildFiles,
+} from '../utils/untrustedContextTracker.js';
 import { WriteFileTool } from '../tools/write-file.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
 import {
@@ -222,6 +226,7 @@ export interface TelemetrySettings {
   target?: TelemetryTarget;
   otlpEndpoint?: string;
   otlpProtocol?: 'grpc' | 'http';
+  otlpHeaders?: Record<string, string>;
   logPrompts?: boolean;
   outfile?: string;
   useCollector?: boolean;
@@ -1096,6 +1101,7 @@ export class Config implements McpContext, AgentLoopContext {
       target: params.telemetry?.target ?? DEFAULT_TELEMETRY_TARGET,
       otlpEndpoint: params.telemetry?.otlpEndpoint ?? DEFAULT_OTLP_ENDPOINT,
       otlpProtocol: params.telemetry?.otlpProtocol,
+      otlpHeaders: params.telemetry?.otlpHeaders,
       logPrompts: params.telemetry?.logPrompts ?? true,
       outfile: params.telemetry?.outfile,
       useCollector: params.telemetry?.useCollector,
@@ -1845,6 +1851,8 @@ export class Config implements McpContext, AgentLoopContext {
     this.approvedPlanPath = undefined;
     this.topicState.reset();
     this.skillManager.reset();
+    resetModifiedBuildFiles(this);
+    resetAcknowledgedUntrustedFlags(this);
     this.latestApiRequest = undefined;
     this.lastModeSwitchTime = performance.now();
     this.compressionTruncationCounter = 0;
@@ -2920,6 +2928,10 @@ export class Config implements McpContext, AgentLoopContext {
 
   getTelemetryOtlpProtocol(): 'grpc' | 'http' {
     return this.telemetrySettings.otlpProtocol ?? 'grpc';
+  }
+
+  getTelemetryOtlpHeaders(): Record<string, string> {
+    return this.telemetrySettings.otlpHeaders ?? {};
   }
 
   getTelemetryTarget(): TelemetryTarget {
